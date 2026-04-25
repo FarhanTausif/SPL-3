@@ -19,6 +19,12 @@ class StaticFindingSeverity(StrEnum):
     error = "error"
 
 
+class SandboxStatus(StrEnum):
+    passed = "passed"
+    failed = "failed"
+    unsupported = "unsupported"
+
+
 class PolicyDecisionState(StrEnum):
     accept = "accept"
     warn_and_return_partial = "warn_and_return_partial"
@@ -30,6 +36,7 @@ class PolicyDecisionState(StrEnum):
 class EvidenceKind(StrEnum):
     claim_extraction = "claim_extraction"
     static_analysis = "static_analysis"
+    sandbox = "sandbox"
     policy = "policy"
 
 
@@ -92,6 +99,14 @@ class StaticFinding(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SandboxResult(BaseModel):
+    status: SandboxStatus
+    check_type: str
+    language: str
+    duration_ms: float = Field(ge=0.0)
+    findings: list[StaticFinding] = Field(default_factory=list)
+
+
 class VerificationEvidence(BaseModel):
     id: str | None = None
     run_id: str | None = None
@@ -114,6 +129,7 @@ class RunResponse(BaseModel):
     coder_output: CoderOutput
     extracted_claims: list[ExtractedClaim]
     static_findings: list[StaticFinding]
+    sandbox_result: SandboxResult
     policy_decision: PolicyDecision
     evidence_ids: list[str]
 
@@ -132,4 +148,3 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     providers: dict[str, bool]
-

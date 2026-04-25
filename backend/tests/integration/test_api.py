@@ -25,7 +25,8 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
     payload = create_response.json()
     run_id = payload["run_id"]
     assert payload["policy_decision"]["state"] == "accept"
-    assert len(payload["evidence_ids"]) == 3
+    assert payload["sandbox_result"]["status"] == "passed"
+    assert len(payload["evidence_ids"]) == 4
 
     detail_response = await client.get(f"/v1/runs/{run_id}")
     assert detail_response.status_code == 200
@@ -36,6 +37,7 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
     assert {item["kind"] for item in evidence_response.json()} == {
         "claim_extraction",
         "static_analysis",
+        "sandbox",
         "policy",
     }
 

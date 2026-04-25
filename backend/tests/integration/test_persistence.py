@@ -25,7 +25,7 @@ def test_run_and_evidence_are_persisted(db_session: Session) -> None:
     assert detail.evidence_summary == {
         "claim_extraction": 1,
         "static_analysis": 1,
+        "sandbox": 1,
         "policy": 1,
     }
-    assert len(evidence) == 3
-
+    assert len(evidence) == 4

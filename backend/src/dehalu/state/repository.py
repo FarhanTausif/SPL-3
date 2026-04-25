@@ -13,6 +13,7 @@ from dehalu.schemas import (
     PolicyDecision,
     RunDetail,
     RunResponse,
+    SandboxResult,
     StaticFinding,
     VerificationEvidence,
 )
@@ -33,6 +34,7 @@ class RunRepository:
         coder_output: CoderOutput,
         extracted_claims: list[ExtractedClaim],
         static_findings: list[StaticFinding],
+        sandbox_result: SandboxResult,
         policy_decision: PolicyDecision,
     ) -> RunResponse:
         run_id = str(uuid4())
@@ -54,6 +56,12 @@ class RunRepository:
                     "findings": [finding.model_dump(mode="json") for finding in static_findings],
                     "finding_count": len(static_findings),
                 },
+            ),
+            EvidenceRecord(
+                id=str(uuid4()),
+                run_id=run_id,
+                kind="sandbox",
+                payload=sandbox_result.model_dump(mode="json"),
             ),
             EvidenceRecord(
                 id=str(uuid4()),
@@ -83,6 +91,7 @@ class RunRepository:
             coder_output=coder_output,
             extracted_claims=extracted_claims,
             static_findings=static_findings,
+            sandbox_result=sandbox_result,
             policy_decision=policy_decision,
             evidence_ids=[record.id for record in evidence_records],
         )
@@ -121,4 +130,3 @@ class RunRepository:
         if run_record is None:
             raise RunNotFoundError(run_id)
         return run_record
-

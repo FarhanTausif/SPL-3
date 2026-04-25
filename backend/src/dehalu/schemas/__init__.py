@@ -10,6 +10,8 @@ from dehalu.schemas.contracts import (
     RunDetail,
     RunRequest,
     RunResponse,
+    SandboxResult,
+    SandboxStatus,
     StaticFinding,
     StaticFindingSeverity,
     VerificationEvidence,
@@ -27,8 +29,9 @@ __all__ = [
     "RunDetail",
     "RunRequest",
     "RunResponse",
+    "SandboxResult",
+    "SandboxStatus",
     "StaticFinding",
     "StaticFindingSeverity",
     "VerificationEvidence",
 ]
-

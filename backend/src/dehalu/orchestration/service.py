@@ -9,6 +9,7 @@ from dehalu.schemas import NormalizedRequest, RunRequest, RunResponse
 from dehalu.state.repository import RunRepository
 from dehalu.verification.claims import ClaimExtractor
 from dehalu.verification.policy import PolicyEngine
+from dehalu.verification.sandbox import SandboxVerifier
 from dehalu.verification.static_analysis import StaticAnalyzer
 
 
@@ -38,6 +39,7 @@ class RunOrchestrator:
         self.providers = providers
         self.claim_extractor = ClaimExtractor(language_registry)
         self.static_analyzer = StaticAnalyzer(language_registry)
+        self.sandbox_verifier = SandboxVerifier()
         self.policy_engine = PolicyEngine()
 
     def run(self, request: RunRequest, session: Session) -> RunResponse:
@@ -49,13 +51,21 @@ class RunOrchestrator:
             coder_output.code,
             normalized.language,
         )
-        policy_decision = self.policy_engine.decide(static_findings, normalized.risk_level)
+        sandbox_result = self.sandbox_verifier.verify(
+            coder_output.code,
+            normalized.language,
+        )
+        policy_decision = self.policy_engine.decide(
+            static_findings,
+            normalized.risk_level,
+            sandbox_result,
+        )
         repository = RunRepository(session)
         return repository.create_run(
             normalized_request=normalized,
             coder_output=coder_output,
             extracted_claims=extracted_claims,
             static_findings=static_findings,
+            sandbox_result=sandbox_result,
             policy_decision=policy_decision,
         )
-

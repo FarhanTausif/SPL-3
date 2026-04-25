@@ -3,6 +3,8 @@ from __future__ import annotations
 from dehalu.schemas import (
     PolicyDecisionState,
     RiskLevel,
+    SandboxResult,
+    SandboxStatus,
     StaticFinding,
     StaticFindingSeverity,
 )
@@ -47,3 +49,24 @@ def test_policy_accepts_clean_evidence() -> None:
     assert decision.state == PolicyDecisionState.accept
     assert decision.score == 0.95
 
+
+def test_policy_rejects_sandbox_errors() -> None:
+    sandbox_result = SandboxResult(
+        status=SandboxStatus.failed,
+        check_type="compile_only",
+        language="python",
+        duration_ms=1.0,
+        findings=[
+            StaticFinding(
+                code="sandbox_compile_error",
+                message="invalid syntax",
+                severity=StaticFindingSeverity.error,
+            )
+        ],
+    )
+
+    decision = PolicyEngine().decide([], RiskLevel.medium, sandbox_result)
+
+    assert decision.state == PolicyDecisionState.reject
+    assert decision.hard_fail is True
+    assert decision.metrics["sandbox_status"] == "failed"
