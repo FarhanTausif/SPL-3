@@ -62,11 +62,20 @@ class RunOrchestrator:
             static_findings,
             sandbox_result,
         )
+        cove_result = provider.cove(
+            normalized,
+            coder_output,
+            extracted_claims,
+            static_findings,
+            sandbox_result,
+            judge_result,
+        )
         policy_decision = self.policy_engine.decide(
             static_findings,
             normalized.risk_level,
             sandbox_result,
             judge_result,
+            cove_result,
         )
         repository = RunRepository(session)
         return repository.create_run(
@@ -76,5 +85,6 @@ class RunOrchestrator:
             static_findings=static_findings,
             sandbox_result=sandbox_result,
             judge_result=judge_result,
+            cove_result=cove_result,
             policy_decision=policy_decision,
         )

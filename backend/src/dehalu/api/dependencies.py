@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+from functools import lru_cache
+
 from dehalu.adapters.llm import ProviderRegistry, build_provider_registry
 from dehalu.core.settings import Settings, get_settings
 from dehalu.orchestration import RunOrchestrator
 
-_provider_registry = build_provider_registry()
+
+@lru_cache
+def _get_provider_registry() -> ProviderRegistry:
+    return build_provider_registry(get_settings())
 
 
 async def get_provider_registry() -> ProviderRegistry:
-    return _provider_registry
+    return _get_provider_registry()
 
 
 async def get_orchestrator() -> RunOrchestrator:
-    return RunOrchestrator(get_settings(), _provider_registry)
+    settings = get_settings()
+    return RunOrchestrator(settings, _get_provider_registry())
 
 
 async def get_app_settings() -> Settings:

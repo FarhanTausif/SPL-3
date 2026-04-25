@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dehalu.schemas import (
+    CoVeCheckVerdict,
+    CoVeClaimCheck,
+    CoVeResult,
+    CoVeVerdict,
     JudgeFinding,
     JudgeResult,
     JudgeVerdict,
@@ -131,6 +135,84 @@ def test_policy_rejects_judge_uncertain_for_high_risk() -> None:
     )
 
     decision = PolicyEngine().decide([], RiskLevel.high, judge_result=judge_result)
+
+    assert decision.state == PolicyDecisionState.reject
+    assert decision.hard_fail is True
+
+
+def test_policy_rejects_cove_fail_without_deterministic_errors() -> None:
+    cove_result = CoVeResult(
+        verdict=CoVeVerdict.fail,
+        provider="fake",
+        model="fake",
+        duration_ms=1.0,
+        hallucination_score=0.9,
+        checks=[
+            CoVeClaimCheck(
+                claim="math.sqrt",
+                question="Does the code use math.sqrt?",
+                answer="No matching symbol was found.",
+                verdict=CoVeCheckVerdict.unsupported,
+            )
+        ],
+        metrics={
+            "supported_claim_count": 0,
+            "unsupported_claim_count": 1,
+            "uncertain_claim_count": 0,
+        },
+    )
+
+    decision = PolicyEngine().decide([], RiskLevel.medium, cove_result=cove_result)
+
+    assert decision.state == PolicyDecisionState.reject
+    assert decision.hard_fail is True
+    assert decision.metrics["cove_verdict"] == "fail"
+
+
+def test_policy_warns_on_cove_uncertain_for_medium_risk() -> None:
+    cove_result = CoVeResult(
+        verdict=CoVeVerdict.uncertain,
+        provider="fake",
+        model="fake",
+        duration_ms=1.0,
+        hallucination_score=0.55,
+        checks=[
+            CoVeClaimCheck(
+                claim="eval(user_input)",
+                question="Is this claim safe and fully verified?",
+                answer="The claim depends on eval and needs stronger verification.",
+                verdict=CoVeCheckVerdict.uncertain,
+            )
+        ],
+        metrics={
+            "supported_claim_count": 0,
+            "unsupported_claim_count": 0,
+            "uncertain_claim_count": 1,
+        },
+    )
+
+    decision = PolicyEngine().decide([], RiskLevel.medium, cove_result=cove_result)
+
+    assert decision.state == PolicyDecisionState.warn_and_return_partial
+    assert decision.hard_fail is False
+    assert decision.metrics["uncertain_claim_count"] == 1
+
+
+def test_policy_rejects_cove_uncertain_for_high_risk() -> None:
+    cove_result = CoVeResult(
+        verdict=CoVeVerdict.uncertain,
+        provider="fake",
+        model="fake",
+        duration_ms=1.0,
+        hallucination_score=0.55,
+        metrics={
+            "supported_claim_count": 0,
+            "unsupported_claim_count": 0,
+            "uncertain_claim_count": 1,
+        },
+    )
+
+    decision = PolicyEngine().decide([], RiskLevel.high, cove_result=cove_result)
 
     assert decision.state == PolicyDecisionState.reject
     assert decision.hard_fail is True

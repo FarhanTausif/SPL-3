@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from dehalu.schemas import (
     CoderOutput,
+    CoVeResult,
     ExtractedClaim,
     JudgeResult,
     NormalizedRequest,
@@ -37,6 +38,7 @@ class RunRepository:
         static_findings: list[StaticFinding],
         sandbox_result: SandboxResult,
         judge_result: JudgeResult,
+        cove_result: CoVeResult,
         policy_decision: PolicyDecision,
     ) -> RunResponse:
         run_id = str(uuid4())
@@ -74,6 +76,12 @@ class RunRepository:
             EvidenceRecord(
                 id=str(uuid4()),
                 run_id=run_id,
+                kind="cove",
+                payload=cove_result.model_dump(mode="json"),
+            ),
+            EvidenceRecord(
+                id=str(uuid4()),
+                run_id=run_id,
                 kind="policy",
                 payload=policy_decision.model_dump(mode="json"),
             ),
@@ -101,6 +109,7 @@ class RunRepository:
             static_findings=static_findings,
             sandbox_result=sandbox_result,
             judge_result=judge_result,
+            cove_result=cove_result,
             policy_decision=policy_decision,
             evidence_ids=[record.id for record in evidence_records],
         )

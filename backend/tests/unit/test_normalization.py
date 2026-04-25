@@ -6,7 +6,7 @@ from dehalu.schemas import RiskLevel, RunRequest
 
 
 def test_normalize_request_uses_defaults() -> None:
-    settings = Settings(database_url="sqlite://")
+    settings = Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)
     normalized = normalize_request(RunRequest(prompt="Write Python code"), settings)
 
     assert normalized.language == "python"
@@ -16,7 +16,7 @@ def test_normalize_request_uses_defaults() -> None:
 
 
 def test_normalize_request_honors_explicit_values() -> None:
-    settings = Settings(database_url="sqlite://")
+    settings = Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)
     normalized = normalize_request(
         RunRequest(
             prompt="Build this",
@@ -32,4 +32,3 @@ def test_normalize_request_honors_explicit_values() -> None:
     assert normalized.provider == "fake"
     assert normalized.risk_level == RiskLevel.high
     assert normalized.latency_budget_seconds == 5
-

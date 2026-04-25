@@ -10,9 +10,10 @@ from dehalu.state.repository import RunRepository
 
 
 def test_run_and_evidence_are_persisted(db_session: Session) -> None:
+    settings = Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)
     orchestrator = RunOrchestrator(
-        Settings(database_url="sqlite://"),
-        build_provider_registry(),
+        settings,
+        build_provider_registry(settings),
     )
 
     response = orchestrator.run(RunRequest(prompt="Write Python code."), db_session)
@@ -27,6 +28,7 @@ def test_run_and_evidence_are_persisted(db_session: Session) -> None:
         "static_analysis": 1,
         "sandbox": 1,
         "judge": 1,
+        "cove": 1,
         "policy": 1,
     }
-    assert len(evidence) == 5
+    assert len(evidence) == 6

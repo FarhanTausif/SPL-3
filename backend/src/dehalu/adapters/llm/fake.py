@@ -4,6 +4,9 @@ from time import perf_counter
 
 from dehalu.schemas import (
     CoderOutput,
+    CoVeCheckVerdict,
+    CoVeClaimCheck,
+    CoVeResult,
     ExtractedClaim,
     JudgeFinding,
     JudgeResult,
@@ -13,6 +16,10 @@ from dehalu.schemas import (
     StaticFinding,
     StaticFindingSeverity,
 )
+from dehalu.verification.judges import build_cove_result, claim_to_question
+
+
+UNSAFE_TOKENS = ("eval", "exec", "os.system", "subprocess")
 
 
 class FakeLLMProvider:
@@ -98,8 +105,7 @@ class FakeLLMProvider:
                 )
             )
 
-        unsafe_tokens = ["eval", "exec", "os.system", "subprocess"]
-        matched_tokens = [token for token in unsafe_tokens if token in output.code]
+        matched_tokens = [token for token in UNSAFE_TOKENS if token in output.code]
         findings.extend(
             JudgeFinding(
                 code="unsafe_or_unverifiable_construct",
@@ -146,8 +152,131 @@ class FakeLLMProvider:
             },
         )
 
+    def cove(
+        self,
+        request: NormalizedRequest,
+        output: CoderOutput,
+        claims: list[ExtractedClaim],
+        static_findings: list[StaticFinding],
+        sandbox_result: SandboxResult,
+        judge_result: JudgeResult,
+    ) -> CoVeResult:
+        started_at = perf_counter()
+        checks: list[CoVeClaimCheck] = []
+        code = output.code.strip()
+
+        if not code:
+            checks.append(
+                CoVeClaimCheck(
+                    claim="generated output",
+                    question="Did the coder return code to verify?",
+                    answer="No code was returned.",
+                    verdict=CoVeCheckVerdict.unsupported,
+                    metadata={"reason": "empty_output"},
+                )
+            )
+
+        if output.language != request.language:
+            checks.append(
+                CoVeClaimCheck(
+                    claim=f"language={request.language}",
+                    question="Does the generated output match the requested language?",
+                    answer=(
+                        f"Output language '{output.language}' does not match "
+                        f"requested language '{request.language}'."
+                    ),
+                    verdict=CoVeCheckVerdict.unsupported,
+                    metadata={
+                        "requested_language": request.language,
+                        "output_language": output.language,
+                    },
+                )
+            )
+
+        for claim in claims:
+            answer, verdict = self._verify_claim(claim, output)
+            checks.append(
+                CoVeClaimCheck(
+                    claim=claim.value,
+                    question=claim_to_question(claim),
+                    answer=answer,
+                    verdict=verdict,
+                    metadata={"kind": claim.kind, "source": claim.source},
+                )
+            )
+
+        result = build_cove_result(
+            provider=self.name,
+            model=self.model,
+            duration_ms=(perf_counter() - started_at) * 1000,
+            checks=checks,
+        )
+        result.metrics.update(
+            {
+                "claim_count": len(claims),
+                "static_finding_count": len(static_findings),
+                "sandbox_status": sandbox_result.status.value,
+                "judge_verdict": judge_result.verdict.value,
+            }
+        )
+        return result
+
     def repair(self, request: NormalizedRequest, output: CoderOutput) -> None:
         raise NotImplementedError("Repair support is deferred to a later backend iteration.")
 
     def healthcheck(self) -> bool:
         return True
+
+    def _verify_claim(
+        self,
+        claim: ExtractedClaim,
+        output: CoderOutput,
+    ) -> tuple[str, CoVeCheckVerdict]:
+        code = output.code
+        if any(token in code or token in claim.value for token in UNSAFE_TOKENS):
+            return (
+                "The claim depends on a construct that needs stronger runtime verification.",
+                CoVeCheckVerdict.uncertain,
+            )
+
+        if claim.kind == "code":
+            verdict = (
+                CoVeCheckVerdict.supported
+                if claim.value.strip() == code.strip()
+                else CoVeCheckVerdict.unsupported
+            )
+            return ("Code claim matches generated output.", verdict)
+
+        if claim.kind == "assumption":
+            verdict = (
+                CoVeCheckVerdict.supported
+                if claim.value in output.assumptions
+                else CoVeCheckVerdict.unsupported
+            )
+            return ("Assumption appears in structured output metadata.", verdict)
+
+        if claim.kind == "dependency":
+            verdict = (
+                CoVeCheckVerdict.supported
+                if claim.value in output.dependencies or claim.value in code
+                else CoVeCheckVerdict.unsupported
+            )
+            return ("Dependency is reflected in metadata or code.", verdict)
+
+        if claim.kind == "import":
+            verdict = (
+                CoVeCheckVerdict.supported
+                if f"import {claim.value}" in code or f"from {claim.value} import" in code
+                else CoVeCheckVerdict.unsupported
+            )
+            return ("Import presence was checked against the code text.", verdict)
+
+        if claim.kind == "symbol":
+            verdict = (
+                CoVeCheckVerdict.supported
+                if claim.value in code
+                else CoVeCheckVerdict.unsupported
+            )
+            return ("Symbol presence was checked against the code text.", verdict)
+
+        return ("The claim type is not modeled by deterministic fake CoVe heuristics.", CoVeCheckVerdict.uncertain)

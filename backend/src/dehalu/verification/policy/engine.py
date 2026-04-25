@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dehalu.schemas import (
+    CoVeResult,
+    CoVeVerdict,
     JudgeResult,
     JudgeVerdict,
     PolicyDecision,
@@ -19,6 +21,7 @@ class PolicyEngine:
         risk_level: RiskLevel,
         sandbox_result: SandboxResult | None = None,
         judge_result: JudgeResult | None = None,
+        cove_result: CoVeResult | None = None,
     ) -> PolicyDecision:
         sandbox_findings = sandbox_result.findings if sandbox_result else []
         all_findings = [*findings, *sandbox_findings]
@@ -43,6 +46,12 @@ class PolicyEngine:
         if judge_result:
             metrics["judge_verdict"] = judge_result.verdict.value
             metrics["judge_hallucination_score"] = judge_result.hallucination_score
+        if cove_result:
+            metrics["cove_verdict"] = cove_result.verdict.value
+            metrics["cove_hallucination_score"] = cove_result.hallucination_score
+            metrics["supported_claim_count"] = cove_result.metrics.get("supported_claim_count", 0)
+            metrics["unsupported_claim_count"] = cove_result.metrics.get("unsupported_claim_count", 0)
+            metrics["uncertain_claim_count"] = cove_result.metrics.get("uncertain_claim_count", 0)
 
         if errors:
             return PolicyDecision(
@@ -63,21 +72,40 @@ class PolicyEngine:
                 metrics=metrics,
             )
 
+        if cove_result and cove_result.verdict == CoVeVerdict.fail:
+            return PolicyDecision(
+                state=PolicyDecisionState.reject,
+                reasons=[finding.message for finding in cove_result.findings]
+                or ["CoVe detected unsupported claims in the output."],
+                hard_fail=True,
+                score=max(0.0, 1.0 - cove_result.hallucination_score),
+                metrics=metrics,
+            )
+
+        prompt_warnings: list[str] = []
         if judge_result and judge_result.verdict == JudgeVerdict.uncertain:
-            reasons = [finding.message for finding in judge_result.findings] or [
-                "Judge could not verify the output with confidence."
-            ]
+            prompt_warnings.extend(
+                [finding.message for finding in judge_result.findings]
+                or ["Judge could not verify the output with confidence."]
+            )
+        if cove_result and cove_result.verdict == CoVeVerdict.uncertain:
+            prompt_warnings.extend(
+                [finding.message for finding in cove_result.findings]
+                or ["CoVe could not verify one or more claims with confidence."]
+            )
+
+        if prompt_warnings:
             if risk_level == RiskLevel.high:
                 return PolicyDecision(
                     state=PolicyDecisionState.reject,
-                    reasons=reasons,
+                    reasons=prompt_warnings,
                     hard_fail=True,
                     score=0.2,
                     metrics=metrics,
                 )
             return PolicyDecision(
                 state=PolicyDecisionState.warn_and_return_partial,
-                reasons=reasons,
+                reasons=prompt_warnings,
                 hard_fail=False,
                 score=0.65,
                 metrics=metrics,

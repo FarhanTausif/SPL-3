@@ -1,5 +1,10 @@
 from dehalu.schemas.contracts import (
     CoderOutput,
+    CoVeCheckVerdict,
+    CoVeClaimCheck,
+    CoVeFinding,
+    CoVeResult,
+    CoVeVerdict,
     EvidenceKind,
     ExtractedClaim,
     HealthResponse,
@@ -22,6 +27,11 @@ from dehalu.schemas.contracts import (
 
 __all__ = [
     "CoderOutput",
+    "CoVeCheckVerdict",
+    "CoVeClaimCheck",
+    "CoVeFinding",
+    "CoVeResult",
+    "CoVeVerdict",
     "EvidenceKind",
     "ExtractedClaim",
     "HealthResponse",

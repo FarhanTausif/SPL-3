@@ -1,8 +1,18 @@
 from __future__ import annotations
 
-import pytest
-from httpx import AsyncClient
+import json
 
+import httpx
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.orm import Session
+
+from dehalu.adapters.llm import GeminiLLMProvider, ProviderRegistry
+from dehalu.api.dependencies import get_orchestrator, get_provider_registry
+from dehalu.core.app import create_app
+from dehalu.core.settings import Settings
+from dehalu.orchestration import RunOrchestrator
+from dehalu.state.database import get_session
 
 pytestmark = pytest.mark.anyio
 
@@ -12,13 +22,13 @@ async def test_health_endpoint(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["providers"] == {"fake": True}
+    assert response.json()["providers"]["fake"] is True
 
 
 async def test_create_and_fetch_run(client: AsyncClient) -> None:
     create_response = await client.post(
         "/v1/runs",
-        json={"prompt": "Write Python code that computes a square root."},
+        json={"prompt": "Write Python code that computes a square root.", "provider": "fake"},
     )
 
     assert create_response.status_code == 201
@@ -27,7 +37,8 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
     assert payload["policy_decision"]["state"] == "accept"
     assert payload["sandbox_result"]["status"] == "passed"
     assert payload["judge_result"]["verdict"] == "pass"
-    assert len(payload["evidence_ids"]) == 5
+    assert payload["cove_result"]["verdict"] == "pass"
+    assert len(payload["evidence_ids"]) == 6
 
     detail_response = await client.get(f"/v1/runs/{run_id}")
     assert detail_response.status_code == 200
@@ -40,6 +51,7 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
         "static_analysis",
         "sandbox",
         "judge",
+        "cove",
         "policy",
     }
 
@@ -51,3 +63,123 @@ async def test_create_run_rejects_unknown_provider(client: AsyncClient) -> None:
     )
 
     assert response.status_code == 400
+
+
+async def test_create_run_with_gemini_provider_persists_judge_and_cove(
+    db_session: Session,
+) -> None:
+    responses = iter(
+        [
+            httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {"content": {"parts": [{"text": "import math\n\nprint(math.sqrt(4))\n"}]}}
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            {
+                                                "verdict": "pass",
+                                                "hallucination_score": 0.08,
+                                                "findings": [],
+                                                "metrics": {"judge_mode": "gemini"},
+                                            }
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            {
+                                                "checks": [
+                                                    {
+                                                        "claim": "math.sqrt",
+                                                        "question": "Does the code use math.sqrt?",
+                                                        "answer": "Yes.",
+                                                        "verdict": "supported",
+                                                        "metadata": {"kind": "symbol"},
+                                                    }
+                                                ],
+                                                "findings": [],
+                                                "hallucination_score": 0.08,
+                                            }
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            ),
+        ]
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: next(responses)))
+    settings = Settings(database_url="sqlite://", gemini_api_key="test-key")
+    registry = ProviderRegistry([GeminiLLMProvider(settings, http_client=client)])
+    app = create_app()
+
+    async def override_registry() -> ProviderRegistry:
+        return registry
+
+    async def override_orchestrator() -> RunOrchestrator:
+        return RunOrchestrator(settings, registry)
+
+    app.dependency_overrides[get_provider_registry] = override_registry
+    app.dependency_overrides[get_orchestrator] = override_orchestrator
+
+    async def override_get_session() -> Session:
+        return db_session
+
+    app.dependency_overrides[get_session] = override_get_session
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as test_client:
+        response = await test_client.post(
+            "/v1/runs",
+            json={"prompt": "Write Python code that computes a square root.", "provider": "gemini"},
+        )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["judge_result"]["provider"] == "gemini"
+    assert payload["cove_result"]["provider"] == "gemini"
+    assert len(payload["evidence_ids"]) == 6
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as evidence_client:
+        evidence_response = await evidence_client.get(f"/v1/runs/{payload['run_id']}/evidence")
+
+    assert evidence_response.status_code == 200
+    assert {item["kind"] for item in evidence_response.json()} == {
+        "claim_extraction",
+        "static_analysis",
+        "sandbox",
+        "judge",
+        "cove",
+        "policy",
+    }

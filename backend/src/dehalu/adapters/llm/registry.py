@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import httpx
+
 from dehalu.adapters.llm.base import LLMProvider
 from dehalu.adapters.llm.fake import FakeLLMProvider
+from dehalu.adapters.llm.gemini import GeminiLLMProvider
+from dehalu.core.settings import Settings
 
 
 class UnknownProviderError(ValueError):
@@ -22,6 +26,13 @@ class ProviderRegistry:
         return {name: provider.healthcheck() for name, provider in self._providers.items()}
 
 
-def build_provider_registry() -> ProviderRegistry:
-    return ProviderRegistry([FakeLLMProvider()])
-
+def build_provider_registry(
+    settings: Settings | None = None,
+    *,
+    gemini_http_client: httpx.Client | None = None,
+) -> ProviderRegistry:
+    settings = settings or Settings()
+    providers: list[LLMProvider] = [FakeLLMProvider()]
+    if settings.gemini_enabled:
+        providers.append(GeminiLLMProvider(settings, http_client=gemini_http_client))
+    return ProviderRegistry(providers)
