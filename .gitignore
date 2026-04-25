@@ -1,0 +1,19 @@
+# Anything related to graphify
+graphify-out/
+
+# Virtual Environment
+venv/
+
+# __pycache__ folders
+__pycache__/
+
+# Bytes-compiled files
+*.pyc
+*.pyo
+*.pyd
+
+# Copilot Instructions
+.github/copilot-instructions.md
+
+# Codex Instructions
+.codex
