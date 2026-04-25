@@ -32,3 +32,32 @@ def test_run_and_evidence_are_persisted(db_session: Session) -> None:
         "policy": 1,
     }
     assert len(evidence) == 6
+
+
+def test_repair_run_persists_both_attempts_and_repair_evidence(db_session: Session) -> None:
+    settings = Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)
+    orchestrator = RunOrchestrator(
+        settings,
+        build_provider_registry(settings),
+    )
+
+    response = orchestrator.run(
+        RunRequest(prompt="Write dangerous Python code.", provider="fake"),
+        db_session,
+    )
+    repository = RunRepository(db_session)
+
+    detail = repository.get_run_detail(response.run_id)
+    evidence = repository.get_run_evidence(response.run_id)
+
+    assert response.repair_result.outcome.value == "succeeded"
+    assert detail.evidence_summary == {
+        "claim_extraction": 2,
+        "static_analysis": 2,
+        "sandbox": 2,
+        "judge": 2,
+        "cove": 2,
+        "repair": 1,
+        "policy": 2,
+    }
+    assert len(evidence) == 13

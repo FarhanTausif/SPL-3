@@ -38,6 +38,7 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
     assert payload["sandbox_result"]["status"] == "passed"
     assert payload["judge_result"]["verdict"] == "pass"
     assert payload["cove_result"]["verdict"] == "pass"
+    assert payload["repair_result"]["outcome"] == "skipped"
     assert len(payload["evidence_ids"]) == 6
 
     detail_response = await client.get(f"/v1/runs/{run_id}")
@@ -65,7 +66,57 @@ async def test_create_run_rejects_unknown_provider(client: AsyncClient) -> None:
     assert response.status_code == 400
 
 
-async def test_create_run_with_gemini_provider_persists_judge_and_cove(
+async def test_create_run_repairs_fake_output_and_returns_final_accept(client: AsyncClient) -> None:
+    response = await client.post(
+        "/v1/runs",
+        json={"prompt": "Write dangerous Python code.", "provider": "fake"},
+    )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["repair_result"]["outcome"] == "succeeded"
+    assert payload["repair_result"]["final_attempt_number"] == 2
+    assert payload["policy_decision"]["state"] == "accept"
+    assert len(payload["evidence_ids"]) == 13
+
+    evidence_response = await client.get(f"/v1/runs/{payload['run_id']}/evidence")
+    evidence = evidence_response.json()
+
+    assert evidence_response.status_code == 200
+    assert len(evidence) == 13
+    assert {item["kind"] for item in evidence} == {
+        "claim_extraction",
+        "static_analysis",
+        "sandbox",
+        "judge",
+        "cove",
+        "repair",
+        "policy",
+    }
+    assert sum(1 for item in evidence if item["kind"] == "repair") == 1
+
+
+async def test_create_run_repair_failure_fails_closed(client: AsyncClient) -> None:
+    response = await client.post(
+        "/v1/runs",
+        json={
+            "prompt": "Write dangerous Python code with repair failure.",
+            "provider": "fake",
+            "risk_level": "high",
+        },
+    )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["repair_result"]["outcome"] == "failed"
+    assert payload["policy_decision"]["state"] == "reject"
+    assert payload["repair_result"]["final_attempt_number"] == 2
+    assert len(payload["evidence_ids"]) == 13
+
+
+async def test_create_run_with_gemini_provider_persists_judge_cove_and_repair_metadata(
     db_session: Session,
 ) -> None:
     responses = iter(
@@ -166,6 +217,7 @@ async def test_create_run_with_gemini_provider_persists_judge_and_cove(
     assert response.status_code == 201
     assert payload["judge_result"]["provider"] == "gemini"
     assert payload["cove_result"]["provider"] == "gemini"
+    assert payload["repair_result"]["outcome"] == "skipped"
     assert len(payload["evidence_ids"]) == 6
 
     async with AsyncClient(

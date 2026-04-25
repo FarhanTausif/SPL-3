@@ -43,6 +43,20 @@ class CoVeCheckVerdict(StrEnum):
     unsupported = "unsupported"
 
 
+class RepairOutcome(StrEnum):
+    attempted = "attempted"
+    succeeded = "succeeded"
+    failed = "failed"
+    skipped = "skipped"
+
+
+class RepairTrigger(StrEnum):
+    judge_fail = "judge_fail"
+    judge_uncertain = "judge_uncertain"
+    cove_fail = "cove_fail"
+    cove_uncertain = "cove_uncertain"
+
+
 class PolicyDecisionState(StrEnum):
     accept = "accept"
     warn_and_return_partial = "warn_and_return_partial"
@@ -57,6 +71,7 @@ class EvidenceKind(StrEnum):
     sandbox = "sandbox"
     judge = "judge"
     cove = "cove"
+    repair = "repair"
     policy = "policy"
 
 
@@ -172,6 +187,25 @@ class CoVeResult(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
 
 
+class RepairAttempt(BaseModel):
+    attempt_number: int = Field(ge=1)
+    trigger: RepairTrigger
+    provider: str
+    model: str
+    duration_ms: float = Field(ge=0.0)
+    input_code: str
+    output_code: str | None = None
+    summary: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RepairResult(BaseModel):
+    outcome: RepairOutcome
+    attempts: list[RepairAttempt] = Field(default_factory=list)
+    final_attempt_number: int = Field(ge=1)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
 class VerificationEvidence(BaseModel):
     id: str | None = None
     run_id: str | None = None
@@ -197,6 +231,7 @@ class RunResponse(BaseModel):
     sandbox_result: SandboxResult
     judge_result: JudgeResult
     cove_result: CoVeResult
+    repair_result: RepairResult
     policy_decision: PolicyDecision
     evidence_ids: list[str]
 

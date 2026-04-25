@@ -8,10 +8,14 @@ from dehalu.adapters.llm import GeminiLLMProvider, build_provider_registry
 from dehalu.core.settings import Settings
 from dehalu.schemas import (
     CoderOutput,
+    CoVeResult,
+    CoVeVerdict,
     ExtractedClaim,
     JudgeResult,
     JudgeVerdict,
     NormalizedRequest,
+    PolicyDecision,
+    PolicyDecisionState,
     RiskLevel,
     SandboxResult,
     SandboxStatus,
@@ -153,3 +157,77 @@ def test_gemini_cove_turns_malformed_json_into_warning_finding() -> None:
 
     assert result.verdict.value == "uncertain"
     assert any(finding.code == "cove_provider_error" for finding in result.findings)
+
+
+def test_gemini_repair_parses_mocked_http() -> None:
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=_response_text("```python\nprint('fixed')\n```"))
+        )
+    )
+    provider = GeminiLLMProvider(_settings(), http_client=client)
+    request = _request()
+    output = CoderOutput(provider="gemini", model="gemini-2.0-flash", language="python", code="print(eval(user_input))\n")
+    policy_decision = PolicyDecision(
+        state=PolicyDecisionState.repair_and_retry,
+        reasons=["Repair the risky construct."],
+        hard_fail=False,
+        score=0.65,
+        metrics={"repair_trigger": "judge_uncertain"},
+    )
+    judge_result = JudgeResult(
+        verdict=JudgeVerdict.uncertain,
+        provider="gemini",
+        model="gemini-2.0-flash",
+        duration_ms=1.0,
+        hallucination_score=0.55,
+    )
+    cove_result = CoVeResult(
+        verdict=CoVeVerdict.uncertain,
+        provider="gemini",
+        model="gemini-2.0-flash",
+        duration_ms=1.0,
+        hallucination_score=0.55,
+    )
+
+    repaired = provider.repair(request, output, policy_decision, judge_result, cove_result)
+
+    assert repaired.code == "print('fixed')"
+    assert any("repair" in note.lower() for note in repaired.execution_notes)
+
+
+def test_gemini_repair_returns_empty_code_for_malformed_output() -> None:
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"candidates": []})
+        )
+    )
+    provider = GeminiLLMProvider(_settings(), http_client=client)
+    request = _request()
+    output = CoderOutput(provider="gemini", model="gemini-2.0-flash", language="python", code="print('ok')\n")
+    policy_decision = PolicyDecision(
+        state=PolicyDecisionState.repair_and_retry,
+        reasons=["Repair this."],
+        hard_fail=False,
+        score=0.65,
+        metrics={"repair_trigger": "judge_fail"},
+    )
+    judge_result = JudgeResult(
+        verdict=JudgeVerdict.fail,
+        provider="gemini",
+        model="gemini-2.0-flash",
+        duration_ms=1.0,
+        hallucination_score=0.9,
+    )
+    cove_result = CoVeResult(
+        verdict=CoVeVerdict.fail,
+        provider="gemini",
+        model="gemini-2.0-flash",
+        duration_ms=1.0,
+        hallucination_score=0.9,
+    )
+
+    repaired = provider.repair(request, output, policy_decision, judge_result, cove_result)
+
+    assert repaired.code == ""
+    assert any("failed" in note.lower() for note in repaired.execution_notes)

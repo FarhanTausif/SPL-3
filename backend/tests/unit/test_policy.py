@@ -97,9 +97,10 @@ def test_policy_rejects_judge_fail_without_deterministic_errors() -> None:
 
     decision = PolicyEngine().decide([], RiskLevel.medium, judge_result=judge_result)
 
-    assert decision.state == PolicyDecisionState.reject
-    assert decision.hard_fail is True
+    assert decision.state == PolicyDecisionState.repair_and_retry
+    assert decision.hard_fail is False
     assert decision.metrics["judge_verdict"] == "fail"
+    assert decision.metrics["repair_trigger"] == "judge_fail"
 
 
 def test_policy_warns_on_judge_uncertain_for_medium_risk() -> None:
@@ -120,9 +121,10 @@ def test_policy_warns_on_judge_uncertain_for_medium_risk() -> None:
 
     decision = PolicyEngine().decide([], RiskLevel.medium, judge_result=judge_result)
 
-    assert decision.state == PolicyDecisionState.warn_and_return_partial
+    assert decision.state == PolicyDecisionState.repair_and_retry
     assert decision.hard_fail is False
     assert decision.metrics["judge_verdict"] == "uncertain"
+    assert decision.metrics["repair_trigger"] == "judge_uncertain"
 
 
 def test_policy_rejects_judge_uncertain_for_high_risk() -> None:
@@ -134,7 +136,7 @@ def test_policy_rejects_judge_uncertain_for_high_risk() -> None:
         hallucination_score=0.55,
     )
 
-    decision = PolicyEngine().decide([], RiskLevel.high, judge_result=judge_result)
+    decision = PolicyEngine().decide([], RiskLevel.high, judge_result=judge_result, allow_repair=False)
 
     assert decision.state == PolicyDecisionState.reject
     assert decision.hard_fail is True
@@ -164,9 +166,10 @@ def test_policy_rejects_cove_fail_without_deterministic_errors() -> None:
 
     decision = PolicyEngine().decide([], RiskLevel.medium, cove_result=cove_result)
 
-    assert decision.state == PolicyDecisionState.reject
-    assert decision.hard_fail is True
+    assert decision.state == PolicyDecisionState.repair_and_retry
+    assert decision.hard_fail is False
     assert decision.metrics["cove_verdict"] == "fail"
+    assert decision.metrics["repair_trigger"] == "cove_fail"
 
 
 def test_policy_warns_on_cove_uncertain_for_medium_risk() -> None:
@@ -193,9 +196,10 @@ def test_policy_warns_on_cove_uncertain_for_medium_risk() -> None:
 
     decision = PolicyEngine().decide([], RiskLevel.medium, cove_result=cove_result)
 
-    assert decision.state == PolicyDecisionState.warn_and_return_partial
+    assert decision.state == PolicyDecisionState.repair_and_retry
     assert decision.hard_fail is False
     assert decision.metrics["uncertain_claim_count"] == 1
+    assert decision.metrics["repair_trigger"] == "cove_uncertain"
 
 
 def test_policy_rejects_cove_uncertain_for_high_risk() -> None:
@@ -212,7 +216,22 @@ def test_policy_rejects_cove_uncertain_for_high_risk() -> None:
         },
     )
 
-    decision = PolicyEngine().decide([], RiskLevel.high, cove_result=cove_result)
+    decision = PolicyEngine().decide([], RiskLevel.high, cove_result=cove_result, allow_repair=False)
 
     assert decision.state == PolicyDecisionState.reject
     assert decision.hard_fail is True
+
+
+def test_policy_warns_on_judge_uncertain_after_repair_attempt() -> None:
+    judge_result = JudgeResult(
+        verdict=JudgeVerdict.uncertain,
+        provider="fake",
+        model="fake",
+        duration_ms=1.0,
+        hallucination_score=0.55,
+    )
+
+    decision = PolicyEngine().decide([], RiskLevel.medium, judge_result=judge_result, allow_repair=False)
+
+    assert decision.state == PolicyDecisionState.warn_and_return_partial
+    assert decision.hard_fail is False

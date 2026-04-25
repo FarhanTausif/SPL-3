@@ -8,6 +8,7 @@ from dehalu.schemas import (
     ExtractedClaim,
     JudgeResult,
     NormalizedRequest,
+    PolicyDecision,
     SandboxResult,
     StaticFinding,
 )
@@ -40,7 +41,14 @@ class LLMProvider(Protocol):
     ) -> CoVeResult:
         raise NotImplementedError("CoVe support is deferred to a later backend iteration.")
 
-    def repair(self, request: NormalizedRequest, output: CoderOutput) -> None:
+    def repair(
+        self,
+        request: NormalizedRequest,
+        output: CoderOutput,
+        policy_decision: PolicyDecision,
+        judge_result: JudgeResult,
+        cove_result: CoVeResult,
+    ) -> CoderOutput:
         raise NotImplementedError("Repair support is deferred to a later backend iteration.")
 
     def healthcheck(self) -> bool:

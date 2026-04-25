@@ -7,6 +7,7 @@ from dehalu.schemas import (
     JudgeVerdict,
     PolicyDecision,
     PolicyDecisionState,
+    RepairTrigger,
     RiskLevel,
     SandboxResult,
     StaticFinding,
@@ -22,6 +23,7 @@ class PolicyEngine:
         sandbox_result: SandboxResult | None = None,
         judge_result: JudgeResult | None = None,
         cove_result: CoVeResult | None = None,
+        allow_repair: bool = True,
     ) -> PolicyDecision:
         sandbox_findings = sandbox_result.findings if sandbox_result else []
         all_findings = [*findings, *sandbox_findings]
@@ -63,6 +65,16 @@ class PolicyEngine:
             )
 
         if judge_result and judge_result.verdict == JudgeVerdict.fail:
+            if allow_repair:
+                metrics["repair_trigger"] = RepairTrigger.judge_fail.value
+                return PolicyDecision(
+                    state=PolicyDecisionState.repair_and_retry,
+                    reasons=[finding.message for finding in judge_result.findings]
+                    or ["Judge detected hallucination risk."],
+                    hard_fail=False,
+                    score=max(0.0, 1.0 - judge_result.hallucination_score),
+                    metrics=metrics,
+                )
             return PolicyDecision(
                 state=PolicyDecisionState.reject,
                 reasons=[finding.message for finding in judge_result.findings]
@@ -73,6 +85,16 @@ class PolicyEngine:
             )
 
         if cove_result and cove_result.verdict == CoVeVerdict.fail:
+            if allow_repair:
+                metrics["repair_trigger"] = RepairTrigger.cove_fail.value
+                return PolicyDecision(
+                    state=PolicyDecisionState.repair_and_retry,
+                    reasons=[finding.message for finding in cove_result.findings]
+                    or ["CoVe detected unsupported claims in the output."],
+                    hard_fail=False,
+                    score=max(0.0, 1.0 - cove_result.hallucination_score),
+                    metrics=metrics,
+                )
             return PolicyDecision(
                 state=PolicyDecisionState.reject,
                 reasons=[finding.message for finding in cove_result.findings]
@@ -83,18 +105,32 @@ class PolicyEngine:
             )
 
         prompt_warnings: list[str] = []
+        prompt_trigger: RepairTrigger | None = None
         if judge_result and judge_result.verdict == JudgeVerdict.uncertain:
+            if prompt_trigger is None:
+                prompt_trigger = RepairTrigger.judge_uncertain
             prompt_warnings.extend(
                 [finding.message for finding in judge_result.findings]
                 or ["Judge could not verify the output with confidence."]
             )
         if cove_result and cove_result.verdict == CoVeVerdict.uncertain:
+            if prompt_trigger is None:
+                prompt_trigger = RepairTrigger.cove_uncertain
             prompt_warnings.extend(
                 [finding.message for finding in cove_result.findings]
                 or ["CoVe could not verify one or more claims with confidence."]
             )
 
         if prompt_warnings:
+            if allow_repair and prompt_trigger is not None:
+                metrics["repair_trigger"] = prompt_trigger.value
+                return PolicyDecision(
+                    state=PolicyDecisionState.repair_and_retry,
+                    reasons=prompt_warnings,
+                    hard_fail=False,
+                    score=0.65,
+                    metrics=metrics,
+                )
             if risk_level == RiskLevel.high:
                 return PolicyDecision(
                     state=PolicyDecisionState.reject,
