@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     default_provider: str = "fake"
     default_language: str = "python"
     default_latency_budget_seconds: int = 15
+    orchestration_mode: str = "direct"
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_generate_model: str = "gemini-2.0-flash"
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     @field_validator(
         "default_provider",
         "default_language",
+        "orchestration_mode",
         "gemini_api_key",
         "gemini_base_url",
         "gemini_generate_model",
@@ -43,6 +45,13 @@ class Settings(BaseSettings):
             return None
         token = value.strip()
         return token or None
+
+    @field_validator("orchestration_mode")
+    @classmethod
+    def validate_orchestration_mode(cls, value: str) -> str:
+        if value not in {"direct", "crewai"}:
+            raise ValueError("orchestration_mode must be 'direct' or 'crewai'")
+        return value
 
     @property
     def gemini_enabled(self) -> bool:

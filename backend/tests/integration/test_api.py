@@ -7,7 +7,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.orm import Session
 
-from dehalu.adapters.llm import GeminiLLMProvider, ProviderRegistry
+from dehalu.adapters.llm import GeminiLLMProvider, ProviderRegistry, build_provider_registry
 from dehalu.api.dependencies import get_orchestrator, get_provider_registry
 from dehalu.core.app import create_app
 from dehalu.core.settings import Settings
@@ -15,6 +15,44 @@ from dehalu.orchestration import RunOrchestrator
 from dehalu.state.database import get_session
 
 pytestmark = pytest.mark.anyio
+
+
+def _build_test_app(
+    settings: Settings,
+    registry: ProviderRegistry,
+    db_session: Session,
+):
+    app = create_app()
+
+    async def override_registry() -> ProviderRegistry:
+        return registry
+
+    async def override_orchestrator() -> RunOrchestrator:
+        return RunOrchestrator(settings, registry)
+
+    async def override_get_session() -> Session:
+        return db_session
+
+    app.dependency_overrides[get_provider_registry] = override_registry
+    app.dependency_overrides[get_orchestrator] = override_orchestrator
+    app.dependency_overrides[get_session] = override_get_session
+    return app
+
+
+def _json_candidate(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": json.dumps(payload),
+                        }
+                    ]
+                }
+            }
+        ]
+    }
 
 
 async def test_health_endpoint(client: AsyncClient) -> None:
@@ -187,21 +225,7 @@ async def test_create_run_with_gemini_provider_persists_judge_cove_and_repair_me
     client = httpx.Client(transport=httpx.MockTransport(lambda request: next(responses)))
     settings = Settings(database_url="sqlite://", gemini_api_key="test-key")
     registry = ProviderRegistry([GeminiLLMProvider(settings, http_client=client)])
-    app = create_app()
-
-    async def override_registry() -> ProviderRegistry:
-        return registry
-
-    async def override_orchestrator() -> RunOrchestrator:
-        return RunOrchestrator(settings, registry)
-
-    app.dependency_overrides[get_provider_registry] = override_registry
-    app.dependency_overrides[get_orchestrator] = override_orchestrator
-
-    async def override_get_session() -> Session:
-        return db_session
-
-    app.dependency_overrides[get_session] = override_get_session
+    app = _build_test_app(settings, registry, db_session)
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -235,3 +259,165 @@ async def test_create_run_with_gemini_provider_persists_judge_cove_and_repair_me
         "cove",
         "policy",
     }
+
+
+async def test_create_run_in_crewai_mode_matches_direct_for_clean_fake(
+    db_session: Session,
+) -> None:
+    settings = Settings(
+        database_url="sqlite://",
+        default_provider="fake",
+        gemini_api_key=None,
+        orchestration_mode="crewai",
+    )
+    registry = build_provider_registry(settings)
+    app = _build_test_app(settings, registry, db_session)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as test_client:
+        response = await test_client.post(
+            "/v1/runs",
+            json={"prompt": "Write Python code that computes a square root.", "provider": "fake"},
+        )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["policy_decision"]["state"] == "accept"
+    assert payload["repair_result"]["outcome"] == "skipped"
+    assert len(payload["evidence_ids"]) == 6
+
+
+async def test_create_run_in_crewai_mode_repairs_fake_output(
+    db_session: Session,
+) -> None:
+    settings = Settings(
+        database_url="sqlite://",
+        default_provider="fake",
+        gemini_api_key=None,
+        orchestration_mode="crewai",
+    )
+    registry = build_provider_registry(settings)
+    app = _build_test_app(settings, registry, db_session)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as test_client:
+        response = await test_client.post(
+            "/v1/runs",
+            json={"prompt": "Write dangerous Python code.", "provider": "fake"},
+        )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["policy_decision"]["state"] == "accept"
+    assert payload["repair_result"]["outcome"] == "succeeded"
+    assert len(payload["evidence_ids"]) == 13
+
+
+async def test_create_run_in_crewai_mode_fails_closed_on_bad_repair(
+    db_session: Session,
+) -> None:
+    settings = Settings(
+        database_url="sqlite://",
+        default_provider="fake",
+        gemini_api_key=None,
+        orchestration_mode="crewai",
+    )
+    registry = build_provider_registry(settings)
+    app = _build_test_app(settings, registry, db_session)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as test_client:
+        response = await test_client.post(
+            "/v1/runs",
+            json={
+                "prompt": "Write dangerous Python code with repair failure.",
+                "provider": "fake",
+                "risk_level": "high",
+            },
+        )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["policy_decision"]["state"] == "reject"
+    assert payload["repair_result"]["outcome"] == "failed"
+    assert len(payload["evidence_ids"]) == 13
+
+
+async def test_create_run_in_crewai_mode_supports_gemini_provider(
+    db_session: Session,
+) -> None:
+    responses = iter(
+        [
+            httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {"content": {"parts": [{"text": "import math\n\nprint(math.sqrt(4))\n"}]}}
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                json=_json_candidate(
+                    {
+                        "verdict": "pass",
+                        "hallucination_score": 0.08,
+                        "findings": [],
+                        "metrics": {"judge_mode": "gemini"},
+                    }
+                ),
+            ),
+            httpx.Response(
+                200,
+                json=_json_candidate(
+                    {
+                        "checks": [
+                            {
+                                "claim": "math.sqrt",
+                                "question": "Does the code use math.sqrt?",
+                                "answer": "Yes.",
+                                "verdict": "supported",
+                                "metadata": {"kind": "symbol"},
+                            }
+                        ],
+                        "findings": [],
+                        "hallucination_score": 0.08,
+                    }
+                ),
+            ),
+        ]
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: next(responses)))
+    settings = Settings(
+        database_url="sqlite://",
+        gemini_api_key="test-key",
+        orchestration_mode="crewai",
+    )
+    registry = ProviderRegistry([GeminiLLMProvider(settings, http_client=client)])
+    app = _build_test_app(settings, registry, db_session)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as test_client:
+        response = await test_client.post(
+            "/v1/runs",
+            json={"prompt": "Write Python code that computes a square root.", "provider": "gemini"},
+        )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["judge_result"]["provider"] == "gemini"
+    assert payload["cove_result"]["provider"] == "gemini"
+    assert payload["repair_result"]["outcome"] == "skipped"
+    assert len(payload["evidence_ids"]) == 6
