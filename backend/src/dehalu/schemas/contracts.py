@@ -25,6 +25,12 @@ class SandboxStatus(StrEnum):
     unsupported = "unsupported"
 
 
+class JudgeVerdict(StrEnum):
+    pass_ = "pass"
+    uncertain = "uncertain"
+    fail = "fail"
+
+
 class PolicyDecisionState(StrEnum):
     accept = "accept"
     warn_and_return_partial = "warn_and_return_partial"
@@ -37,6 +43,7 @@ class EvidenceKind(StrEnum):
     claim_extraction = "claim_extraction"
     static_analysis = "static_analysis"
     sandbox = "sandbox"
+    judge = "judge"
     policy = "policy"
 
 
@@ -107,6 +114,24 @@ class SandboxResult(BaseModel):
     findings: list[StaticFinding] = Field(default_factory=list)
 
 
+class JudgeFinding(BaseModel):
+    code: str
+    message: str
+    severity: StaticFindingSeverity
+    claim: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class JudgeResult(BaseModel):
+    verdict: JudgeVerdict
+    provider: str
+    model: str
+    duration_ms: float = Field(ge=0.0)
+    hallucination_score: float = Field(ge=0.0, le=1.0)
+    findings: list[JudgeFinding] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
 class VerificationEvidence(BaseModel):
     id: str | None = None
     run_id: str | None = None
@@ -130,6 +155,7 @@ class RunResponse(BaseModel):
     extracted_claims: list[ExtractedClaim]
     static_findings: list[StaticFinding]
     sandbox_result: SandboxResult
+    judge_result: JudgeResult
     policy_decision: PolicyDecision
     evidence_ids: list[str]
 

@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from dehalu.schemas import CoderOutput, NormalizedRequest
+from time import perf_counter
+
+from dehalu.schemas import (
+    CoderOutput,
+    ExtractedClaim,
+    JudgeFinding,
+    JudgeResult,
+    JudgeVerdict,
+    NormalizedRequest,
+    SandboxResult,
+    StaticFinding,
+    StaticFindingSeverity,
+)
 
 
 class FakeLLMProvider:
@@ -39,12 +51,103 @@ class FakeLLMProvider:
             execution_notes=["No sandbox execution was performed in this iteration."],
         )
 
-    def judge(self, request: NormalizedRequest, output: CoderOutput) -> None:
-        raise NotImplementedError("Judge support is deferred to a later backend iteration.")
+    def judge(
+        self,
+        request: NormalizedRequest,
+        output: CoderOutput,
+        claims: list[ExtractedClaim],
+        static_findings: list[StaticFinding],
+        sandbox_result: SandboxResult,
+    ) -> JudgeResult:
+        started_at = perf_counter()
+        findings: list[JudgeFinding] = []
+        code = output.code.strip()
+
+        if not code:
+            findings.append(
+                JudgeFinding(
+                    code="empty_output",
+                    message="Coder output did not include code to verify.",
+                    severity=StaticFindingSeverity.error,
+                )
+            )
+
+        if output.language != request.language:
+            findings.append(
+                JudgeFinding(
+                    code="language_mismatch",
+                    message=(
+                        f"Coder output language '{output.language}' does not match "
+                        f"requested language '{request.language}'."
+                    ),
+                    severity=StaticFindingSeverity.error,
+                    metadata={
+                        "requested_language": request.language,
+                        "output_language": output.language,
+                    },
+                )
+            )
+
+        if request.language == "python" and code.startswith("// Fake provider placeholder"):
+            findings.append(
+                JudgeFinding(
+                    code="python_placeholder",
+                    message="Python request received a non-Python placeholder output.",
+                    severity=StaticFindingSeverity.error,
+                    metadata={"language": request.language},
+                )
+            )
+
+        unsafe_tokens = ["eval", "exec", "os.system", "subprocess"]
+        matched_tokens = [token for token in unsafe_tokens if token in output.code]
+        findings.extend(
+            JudgeFinding(
+                code="unsafe_or_unverifiable_construct",
+                message=f"Code uses construct requiring stronger verification: {token}.",
+                severity=StaticFindingSeverity.warning,
+                claim=token,
+                metadata={"token": token},
+            )
+            for token in matched_tokens
+        )
+
+        errors = [
+            finding
+            for finding in findings
+            if finding.severity == StaticFindingSeverity.error
+        ]
+        warnings = [
+            finding
+            for finding in findings
+            if finding.severity == StaticFindingSeverity.warning
+        ]
+        if errors:
+            verdict = JudgeVerdict.fail
+            hallucination_score = 0.9
+        elif warnings:
+            verdict = JudgeVerdict.uncertain
+            hallucination_score = 0.55
+        else:
+            verdict = JudgeVerdict.pass_
+            hallucination_score = 0.05
+
+        return JudgeResult(
+            verdict=verdict,
+            provider=self.name,
+            model=self.model,
+            duration_ms=round((perf_counter() - started_at) * 1000, 3),
+            hallucination_score=hallucination_score,
+            findings=findings,
+            metrics={
+                "claim_count": len(claims),
+                "static_finding_count": len(static_findings),
+                "sandbox_status": sandbox_result.status.value,
+                "unsafe_token_count": len(matched_tokens),
+            },
+        )
 
     def repair(self, request: NormalizedRequest, output: CoderOutput) -> None:
         raise NotImplementedError("Repair support is deferred to a later backend iteration.")
 
     def healthcheck(self) -> bool:
         return True
-

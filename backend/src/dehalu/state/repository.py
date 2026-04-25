@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from dehalu.schemas import (
     CoderOutput,
     ExtractedClaim,
+    JudgeResult,
     NormalizedRequest,
     PolicyDecision,
     RunDetail,
@@ -35,6 +36,7 @@ class RunRepository:
         extracted_claims: list[ExtractedClaim],
         static_findings: list[StaticFinding],
         sandbox_result: SandboxResult,
+        judge_result: JudgeResult,
         policy_decision: PolicyDecision,
     ) -> RunResponse:
         run_id = str(uuid4())
@@ -66,6 +68,12 @@ class RunRepository:
             EvidenceRecord(
                 id=str(uuid4()),
                 run_id=run_id,
+                kind="judge",
+                payload=judge_result.model_dump(mode="json"),
+            ),
+            EvidenceRecord(
+                id=str(uuid4()),
+                run_id=run_id,
                 kind="policy",
                 payload=policy_decision.model_dump(mode="json"),
             ),
@@ -92,6 +100,7 @@ class RunRepository:
             extracted_claims=extracted_claims,
             static_findings=static_findings,
             sandbox_result=sandbox_result,
+            judge_result=judge_result,
             policy_decision=policy_decision,
             evidence_ids=[record.id for record in evidence_records],
         )

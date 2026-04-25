@@ -55,10 +55,18 @@ class RunOrchestrator:
             coder_output.code,
             normalized.language,
         )
+        judge_result = provider.judge(
+            normalized,
+            coder_output,
+            extracted_claims,
+            static_findings,
+            sandbox_result,
+        )
         policy_decision = self.policy_engine.decide(
             static_findings,
             normalized.risk_level,
             sandbox_result,
+            judge_result,
         )
         repository = RunRepository(session)
         return repository.create_run(
@@ -67,5 +75,6 @@ class RunOrchestrator:
             extracted_claims=extracted_claims,
             static_findings=static_findings,
             sandbox_result=sandbox_result,
+            judge_result=judge_result,
             policy_decision=policy_decision,
         )

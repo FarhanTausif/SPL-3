@@ -26,7 +26,8 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
     run_id = payload["run_id"]
     assert payload["policy_decision"]["state"] == "accept"
     assert payload["sandbox_result"]["status"] == "passed"
-    assert len(payload["evidence_ids"]) == 4
+    assert payload["judge_result"]["verdict"] == "pass"
+    assert len(payload["evidence_ids"]) == 5
 
     detail_response = await client.get(f"/v1/runs/{run_id}")
     assert detail_response.status_code == 200
@@ -38,6 +39,7 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
         "claim_extraction",
         "static_analysis",
         "sandbox",
+        "judge",
         "policy",
     }
 
