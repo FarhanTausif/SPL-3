@@ -6,9 +6,11 @@ from sqlalchemy.orm import Session
 
 from dehalu.adapters.language import build_language_registry
 from dehalu.adapters.llm import ProviderRegistry
+from dehalu.adapters.llm.base import LLMProvider
 from dehalu.adapters.tools import ToolGateway
 from dehalu.core.settings import Settings
 from dehalu.orchestration.execution import build_execution_engine
+from dehalu.orchestration.routing import ProviderRouter
 from dehalu.schemas import (
     AgentRole,
     ClarificationResult,
@@ -25,6 +27,7 @@ from dehalu.schemas import (
     RunResponse,
     StageStatus,
 )
+from dehalu.state.models import RunRecord
 from dehalu.state.repository import RunRepository
 from dehalu.verification.claims import ClaimExtractor
 from dehalu.verification.policy import PolicyEngine
@@ -73,6 +76,7 @@ class RunOrchestrator:
             self.sandbox_verifier,
             self.policy_engine,
         )
+        self.router = ProviderRouter(providers)
 
     def run(self, request: RunRequest, session: Session) -> RunResponse:
         normalized = normalize_request(request, self.settings)
@@ -99,32 +103,37 @@ class RunOrchestrator:
                 ],
             )
 
-        created = repository.create_pending_run(normalized_request=normalized, run_mode=RunMode.advanced)
-        self.process_advanced_run(created.run_id, normalized, repository)
-        return RunRepository(session).get_run_response(created.run_id)
+        return repository.create_pending_run(normalized_request=normalized, run_mode=RunMode.advanced)
 
-    def process_advanced_run(
-        self,
-        run_id: str,
-        normalized: NormalizedRequest,
-        repository: RunRepository,
-    ) -> None:
-        repository.mark_running(run_id)
+    def process_claimed_run(self, run_record: RunRecord, session: Session) -> RunResponse | RunDetail:
+        repository = RunRepository(session)
+        normalized = NormalizedRequest.model_validate(run_record.normalized_request)
         stage_summary = [self._stage("clarification", "running")]
-        primary_provider = self.providers.get(normalized.provider)
-        clarification = primary_provider.clarify(normalized)
+
+        clarification_provider = self.router.get_clarification_provider()
+        clarification = clarification_provider.clarify(normalized)
         stage_summary[0] = self._stage(
             "clarification",
             "completed" if not clarification.needs_user_input else "needs_clarification",
-            {"ambiguity_flags": clarification.ambiguity_flags},
+            {
+                "provider": clarification_provider.name,
+                "ambiguity_flags": clarification.ambiguity_flags,
+            },
         )
-        repository.set_clarification_result(run_id, clarification, stage_summary=stage_summary)
+        repository.set_clarification_result(run_record.id, clarification, stage_summary=stage_summary)
         if clarification.needs_user_input:
-            return
+            return repository.get_run_detail(run_record.id)
 
-        stage_summary.append(self._stage("generation", "running"))
-        execution_result = self.execution_engine.execute(normalized, primary_provider)
-        stage_summary[-1] = self._stage("generation", "completed")
+        generation_provider = self.router.get_generation_provider(normalized.provider)
+        worker_request = normalized.model_copy(update={"provider": generation_provider.name})
+        repository.heartbeat_run(
+            run_record.id,
+            worker_id=self.settings.worker_id,
+            lease_seconds=self.settings.worker_lease_seconds,
+        )
+        stage_summary.append(self._stage("generation", "running", {"provider": generation_provider.name}))
+        execution_result = self.execution_engine.execute(worker_request, generation_provider)
+        stage_summary[-1] = self._stage("generation", "completed", {"provider": generation_provider.name})
 
         final_attempt = execution_result.final_attempt
         claim_values = [claim.value for claim in final_attempt.extracted_claims]
@@ -136,11 +145,15 @@ class RunOrchestrator:
             policy=normalized.tool_policy,
         )
 
-        judge_provider_names = [name for name in self.providers.names() if name != "fake"]
-        judge_providers = [self.providers.get(name) for name in judge_provider_names] or [primary_provider]
+        repository.heartbeat_run(
+            run_record.id,
+            worker_id=self.settings.worker_id,
+            lease_seconds=self.settings.worker_lease_seconds,
+        )
+        judge_providers = self.router.get_judge_providers() or [generation_provider]
         judge_results = [
             provider.judge(
-                normalized,
+                worker_request,
                 final_attempt.coder_output,
                 final_attempt.extracted_claims,
                 final_attempt.static_findings,
@@ -148,31 +161,47 @@ class RunOrchestrator:
             )
             for provider in judge_providers
         ]
+        cove_providers = self.router.get_cove_providers() or [generation_provider]
         cove_results = [
             provider.cove(
-                normalized,
+                worker_request,
                 final_attempt.coder_output,
                 final_attempt.extracted_claims,
                 final_attempt.static_findings,
                 final_attempt.sandbox_result,
-                judge_results[index],
+                judge_results[min(index, len(judge_results) - 1)],
             )
-            for index, provider in enumerate(judge_providers)
+            for index, provider in enumerate(cove_providers)
         ]
-        panel = self._build_panel(judge_provider_names or [primary_provider.name], judge_results, cove_results)
+        panel = self._build_panel(
+            [provider.name for provider in judge_providers],
+            judge_results,
+            cove_results,
+        )
+        repair_selection = self.router.choose_repair_provider(
+            judge_results=judge_results,
+            generation_provider=generation_provider,
+        )
         fused_metrics = self._fuse_metrics(final_attempt, tool_records, panel)
 
         stage_summary.extend(
             [
                 self._stage("tooling", "completed", {"tool_count": len(tool_records)}),
                 self._stage("panel_verification", "completed", {"providers": panel.providers}),
-                self._stage("policy", "completed", {"policy_state": final_attempt.policy_decision.state.value}),
+                self._stage(
+                    "policy",
+                    "completed",
+                    {
+                        "policy_state": final_attempt.policy_decision.state.value,
+                        "repair_provider": repair_selection.provider_name,
+                    },
+                ),
             ]
         )
 
-        repository.complete_run(
-            run_id=run_id,
-            normalized_request=normalized,
+        return repository.complete_run(
+            run_id=run_record.id,
+            normalized_request=worker_request,
             original_attempt=(
                 execution_result.initial_attempt
                 if execution_result.repair_result.outcome != RepairOutcome.skipped
@@ -198,9 +227,13 @@ class RunOrchestrator:
                 (
                     EvidenceKind.routing,
                     {
-                        "primary_provider": primary_provider.name,
+                        "clarification_provider": clarification_provider.name,
+                        "generation_provider": generation_provider.name,
                         "judge_panel": panel.providers,
-                        "repair_provider": primary_provider.name,
+                        "cove_providers": [provider.name for provider in cove_providers],
+                        "repair_provider": repair_selection.provider_name,
+                        "repair_reason": repair_selection.reason,
+                        "repair_fallback_used": repair_selection.fallback_used,
                     },
                 ),
                 (EvidenceKind.clarification, clarification.model_dump(mode="json")),

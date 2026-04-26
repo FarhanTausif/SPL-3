@@ -23,6 +23,7 @@ router = APIRouter()
 async def health(
     settings: Settings = Depends(get_app_settings),
     providers=Depends(get_provider_registry),
+    orchestrator: RunOrchestrator = Depends(get_orchestrator),
 ) -> HealthResponse:
     provider_health = providers.health()
     status_value = "ok" if all(provider_health.values()) else "degraded"
@@ -34,7 +35,9 @@ async def health(
             "configured_mode": settings.orchestration_mode,
             "crewai_available": HAS_CREWAI,
             "crewai_enabled": settings.orchestration_mode == "crewai" and HAS_CREWAI,
-            "advanced_run_mode": True,
+            "advanced_run_mode": "worker_backed",
+            "worker_id": settings.worker_id,
+            "provider_role_readiness": orchestrator.router.readiness(),
         },
     )
 

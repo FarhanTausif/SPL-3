@@ -8,6 +8,13 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from dehalu.core.settings import Settings
+from dehalu.orchestration.prompts import (
+    clarification_prompt,
+    cove_prompt,
+    generation_prompt,
+    judge_prompt,
+    repair_prompt,
+)
 from dehalu.schemas import (
     ClarificationResult,
     CoderOutput,
@@ -56,19 +63,10 @@ class GeminiLLMProvider:
         self._client = http_client or httpx.Client(timeout=self.timeout_seconds)
 
     def generate(self, request: NormalizedRequest) -> CoderOutput:
-        prompt = (
-            "Return only source code.\n"
-            f"Requested language: {request.language}\n"
-            f"Risk level: {request.risk_level.value}\n"
-            f"Latency budget seconds: {request.latency_budget_seconds}\n"
-            f"User prompt:\n{request.prompt}\n"
-        )
+        system_instruction, prompt = generation_prompt(self.name, request)
         response = self._generate_content(
             model=self.generate_model,
-            system_instruction=(
-                "You are a coding model inside a verification gateway. "
-                "Return only the requested source code without markdown fences."
-            ),
+            system_instruction=system_instruction,
             prompt=prompt,
             generation_config={"temperature": 0.1, "maxOutputTokens": 2048},
         )
@@ -88,16 +86,11 @@ class GeminiLLMProvider:
         )
 
     def clarify(self, request: NormalizedRequest) -> ClarificationResult:
-        prompt = (
-            "Normalize the coding request into a structured task spec.\n"
-            "Return strict JSON with requested_outcome, language, runtime_assumptions, "
-            "constraints, acceptance_criteria, ambiguity_flags, needs_user_input, confidence.\n"
-            f"Request:\n{request.model_dump_json(indent=2)}\n"
-        )
+        system_instruction, prompt = clarification_prompt(self.name, request)
         try:
             response = self._generate_content(
                 model=self.verify_model,
-                system_instruction="You clarify software requests before generation. Return strict JSON only.",
+                system_instruction=system_instruction,
                 prompt=prompt,
                 generation_config={"temperature": 0.0, "responseMimeType": "application/json"},
             )
@@ -138,19 +131,18 @@ class GeminiLLMProvider:
     ) -> JudgeResult:
         started_at = perf_counter()
         try:
+            system_instruction, prompt = judge_prompt(
+                self.name,
+                request,
+                output,
+                claims,
+                static_findings,
+                sandbox_result,
+            )
             response = self._generate_content(
                 model=self.verify_model,
-                system_instruction=(
-                    "You are a code hallucination judge. "
-                    "Return strict JSON that matches the requested schema."
-                ),
-                prompt=self._build_judge_prompt(
-                    request,
-                    output,
-                    claims,
-                    static_findings,
-                    sandbox_result,
-                ),
+                system_instruction=system_instruction,
+                prompt=prompt,
                 generation_config={
                     "temperature": 0.0,
                     "responseMimeType": "application/json",
@@ -207,20 +199,19 @@ class GeminiLLMProvider:
     ) -> CoVeResult:
         started_at = perf_counter()
         try:
+            system_instruction, prompt = cove_prompt(
+                self.name,
+                request,
+                output,
+                claims,
+                static_findings,
+                sandbox_result,
+                judge_result,
+            )
             response = self._generate_content(
                 model=self.verify_model,
-                system_instruction=(
-                    "You are a Chain-of-Verification checker for generated code. "
-                    "Return strict JSON that matches the requested schema."
-                ),
-                prompt=self._build_cove_prompt(
-                    request,
-                    output,
-                    claims,
-                    static_findings,
-                    sandbox_result,
-                    judge_result,
-                ),
+                system_instruction=system_instruction,
+                prompt=prompt,
                 generation_config={
                     "temperature": 0.0,
                     "responseMimeType": "application/json",
@@ -281,19 +272,18 @@ class GeminiLLMProvider:
         cove_result: CoVeResult,
     ) -> CoderOutput:
         try:
+            system_instruction, prompt = repair_prompt(
+                self.name,
+                request,
+                output,
+                policy_decision,
+                judge_result,
+                cove_result,
+            )
             response = self._generate_content(
                 model=self.verify_model,
-                system_instruction=(
-                    "You repair generated source code after hallucination detection. "
-                    "Return only revised source code without markdown fences."
-                ),
-                prompt=self._build_repair_prompt(
-                    request,
-                    output,
-                    policy_decision,
-                    judge_result,
-                    cove_result,
-                ),
+                system_instruction=system_instruction,
+                prompt=prompt,
                 generation_config={"temperature": 0.0, "maxOutputTokens": 2048},
             )
             code = self._strip_code_fences(self._extract_text(response))
@@ -329,62 +319,6 @@ class GeminiLLMProvider:
 
     def healthcheck(self) -> bool:
         return bool(self.api_key)
-
-    def _build_judge_prompt(
-        self,
-        request: NormalizedRequest,
-        output: CoderOutput,
-        claims: list[ExtractedClaim],
-        static_findings: list[StaticFinding],
-        sandbox_result: SandboxResult,
-    ) -> str:
-        return (
-            "Evaluate whether the generated code is hallucinated or unsupported.\n"
-            "Use only the evidence below.\n\n"
-            f"Normalized request:\n{request.model_dump_json(indent=2)}\n\n"
-            f"Coder output:\n{output.model_dump_json(indent=2)}\n\n"
-            f"Extracted claims:\n{self._dump_models(claims)}\n\n"
-            f"Static findings:\n{self._dump_models(static_findings)}\n\n"
-            f"Sandbox result:\n{sandbox_result.model_dump_json(indent=2)}\n"
-        )
-
-    def _build_cove_prompt(
-        self,
-        request: NormalizedRequest,
-        output: CoderOutput,
-        claims: list[ExtractedClaim],
-        static_findings: list[StaticFinding],
-        sandbox_result: SandboxResult,
-        judge_result: JudgeResult,
-    ) -> str:
-        return (
-            "Re-check each extracted claim independently against the generated code.\n"
-            "Return one structured check per claim and summarize unsupported or uncertain claims.\n\n"
-            f"Normalized request:\n{request.model_dump_json(indent=2)}\n\n"
-            f"Coder output:\n{output.model_dump_json(indent=2)}\n\n"
-            f"Extracted claims:\n{self._dump_models(claims)}\n\n"
-            f"Static findings:\n{self._dump_models(static_findings)}\n\n"
-            f"Sandbox result:\n{sandbox_result.model_dump_json(indent=2)}\n\n"
-            f"Judge result:\n{judge_result.model_dump_json(indent=2)}\n"
-        )
-
-    def _build_repair_prompt(
-        self,
-        request: NormalizedRequest,
-        output: CoderOutput,
-        policy_decision: PolicyDecision,
-        judge_result: JudgeResult,
-        cove_result: CoVeResult,
-    ) -> str:
-        return (
-            "Revise the generated code to address hallucination or unsupported-claim findings.\n"
-            "Return only corrected source code.\n\n"
-            f"Normalized request:\n{request.model_dump_json(indent=2)}\n\n"
-            f"Current coder output:\n{output.model_dump_json(indent=2)}\n\n"
-            f"Policy decision:\n{policy_decision.model_dump_json(indent=2)}\n\n"
-            f"Judge result:\n{judge_result.model_dump_json(indent=2)}\n\n"
-            f"CoVe result:\n{cove_result.model_dump_json(indent=2)}\n"
-        )
 
     def _generate_content(
         self,
@@ -434,8 +368,3 @@ class GeminiLLMProvider:
         if lines and lines[-1].startswith("```"):
             lines = lines[:-1]
         return "\n".join(lines).strip()
-
-    def _dump_models(self, models: list[BaseModel]) -> str:
-        if not models:
-            return "[]"
-        return "[\n" + ",\n".join(model.model_dump_json(indent=2) for model in models) + "\n]"

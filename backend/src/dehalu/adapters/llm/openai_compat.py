@@ -7,6 +7,13 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
+from dehalu.orchestration.prompts import (
+    clarification_prompt,
+    cove_prompt,
+    generation_prompt,
+    judge_prompt,
+    repair_prompt,
+)
 from dehalu.schemas import (
     ClarificationResult,
     CoderOutput,
@@ -72,16 +79,11 @@ class OpenAICompatibleLLMProvider:
 
     def clarify(self, request: NormalizedRequest) -> ClarificationResult:
         try:
+            system_instruction, prompt = clarification_prompt(self.name, request)
             text = self._chat_completion(
                 model=self.verify_model,
-                system_instruction=(
-                    "You clarify software requests before generation. "
-                    "Return strict JSON only."
-                ),
-                prompt=(
-                    "Normalize the coding request into a structured task spec.\n"
-                    f"Request:\n{request.model_dump_json(indent=2)}\n"
-                ),
+                system_instruction=system_instruction,
+                prompt=prompt,
                 response_format={"type": "json_object"},
             )
             payload = _ClarificationPayload.model_validate_json(text)
@@ -115,20 +117,11 @@ class OpenAICompatibleLLMProvider:
             )
 
     def generate(self, request: NormalizedRequest) -> CoderOutput:
+        system_instruction, prompt = generation_prompt(self.name, request)
         code = self._chat_completion(
             model=self.generate_model,
-            system_instruction=(
-                "You are a coding model inside a verification gateway. "
-                "Return only source code without markdown fences."
-            ),
-            prompt=(
-                "Return only source code.\n"
-                f"Requested language: {request.language}\n"
-                f"Risk level: {request.risk_level.value}\n"
-                f"Latency budget seconds: {request.latency_budget_seconds}\n"
-                f"Framework hint: {request.framework_hint or 'none'}\n"
-                f"User prompt:\n{request.prompt}\n"
-            ),
+            system_instruction=system_instruction,
+            prompt=prompt,
         )
         return CoderOutput(
             provider=self.name,
@@ -154,18 +147,18 @@ class OpenAICompatibleLLMProvider:
     ) -> JudgeResult:
         started_at = perf_counter()
         try:
+            system_instruction, prompt = judge_prompt(
+                self.name,
+                request,
+                output,
+                claims,
+                static_findings,
+                sandbox_result,
+            )
             text = self._chat_completion(
                 model=self.verify_model,
-                system_instruction="You are a code hallucination judge. Return strict JSON only.",
-                prompt=(
-                    "Evaluate whether the generated code is hallucinated or unsupported.\n"
-                    "Use only the evidence below.\n\n"
-                    f"Normalized request:\n{request.model_dump_json(indent=2)}\n\n"
-                    f"Coder output:\n{output.model_dump_json(indent=2)}\n\n"
-                    f"Extracted claims:\n{self._dump_models(claims)}\n\n"
-                    f"Static findings:\n{self._dump_models(static_findings)}\n\n"
-                    f"Sandbox result:\n{sandbox_result.model_dump_json(indent=2)}\n"
-                ),
+                system_instruction=system_instruction,
+                prompt=prompt,
                 response_format={"type": "json_object"},
             )
             payload = _JudgePayload.model_validate_json(text)
@@ -217,19 +210,19 @@ class OpenAICompatibleLLMProvider:
     ) -> CoVeResult:
         started_at = perf_counter()
         try:
+            system_instruction, prompt = cove_prompt(
+                self.name,
+                request,
+                output,
+                claims,
+                static_findings,
+                sandbox_result,
+                judge_result,
+            )
             text = self._chat_completion(
                 model=self.verify_model,
-                system_instruction="You are a Chain-of-Verification checker for generated code. Return strict JSON only.",
-                prompt=(
-                    "Re-check each extracted claim independently against the generated code.\n"
-                    "Return one structured check per claim and summarize unsupported or uncertain claims.\n\n"
-                    f"Normalized request:\n{request.model_dump_json(indent=2)}\n\n"
-                    f"Coder output:\n{output.model_dump_json(indent=2)}\n\n"
-                    f"Extracted claims:\n{self._dump_models(claims)}\n\n"
-                    f"Static findings:\n{self._dump_models(static_findings)}\n\n"
-                    f"Sandbox result:\n{sandbox_result.model_dump_json(indent=2)}\n\n"
-                    f"Judge result:\n{judge_result.model_dump_json(indent=2)}\n"
-                ),
+                system_instruction=system_instruction,
+                prompt=prompt,
                 response_format={"type": "json_object"},
             )
             payload = _CoVePayload.model_validate_json(text)
@@ -286,21 +279,18 @@ class OpenAICompatibleLLMProvider:
         cove_result: CoVeResult,
     ) -> CoderOutput:
         try:
+            system_instruction, prompt = repair_prompt(
+                self.name,
+                request,
+                output,
+                policy_decision,
+                judge_result,
+                cove_result,
+            )
             code = self._chat_completion(
                 model=self.verify_model,
-                system_instruction=(
-                    "You repair generated source code after hallucination detection. "
-                    "Return only revised source code without markdown fences."
-                ),
-                prompt=(
-                    "Revise the generated code to address hallucination or unsupported-claim findings.\n"
-                    "Return only corrected source code.\n\n"
-                    f"Normalized request:\n{request.model_dump_json(indent=2)}\n\n"
-                    f"Current coder output:\n{output.model_dump_json(indent=2)}\n\n"
-                    f"Policy decision:\n{policy_decision.model_dump_json(indent=2)}\n\n"
-                    f"Judge result:\n{judge_result.model_dump_json(indent=2)}\n\n"
-                    f"CoVe result:\n{cove_result.model_dump_json(indent=2)}\n"
-                ),
+                system_instruction=system_instruction,
+                prompt=prompt,
             )
             cleaned = self._strip_code_fences(code)
             if not cleaned.strip():
@@ -382,8 +372,3 @@ class OpenAICompatibleLLMProvider:
         if lines and lines[-1].startswith("```"):
             lines = lines[:-1]
         return "\n".join(lines).strip()
-
-    def _dump_models(self, models: list[BaseModel]) -> str:
-        if not models:
-            return "[]"
-        return "[\n" + ",\n".join(model.model_dump_json(indent=2) for model in models) + "\n]"

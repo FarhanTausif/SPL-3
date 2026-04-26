@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from dehalu.schemas import (
@@ -69,6 +70,14 @@ class RunRepository:
             provider=normalized_request.provider,
             status=RunLifecycleStatus.queued.value,
             run_mode=run_mode.value,
+            queued_at=datetime.now(timezone.utc),
+            started_at=None,
+            completed_at=None,
+            claimed_by=None,
+            last_heartbeat_at=None,
+            lease_expires_at=None,
+            attempt_count=0,
+            last_error=None,
             normalized_request=normalized_request.model_dump(mode="json"),
             coder_output=None,
             policy_decision=None,
@@ -96,9 +105,68 @@ class RunRepository:
             evidence_ids=[],
         )
 
-    def mark_running(self, run_id: str) -> None:
-        run_record = self._get_run(run_id)
+    def claim_next_advanced_run(
+        self,
+        *,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> RunRecord | None:
+        now = datetime.now(timezone.utc)
+        statement = (
+            select(RunRecord)
+            .where(
+                RunRecord.run_mode == RunMode.advanced.value,
+                or_(
+                    RunRecord.status == RunLifecycleStatus.queued.value,
+                    (
+                        RunRecord.status == RunLifecycleStatus.running.value
+                    )
+                    & (
+                        or_(
+                            RunRecord.lease_expires_at.is_(None),
+                            RunRecord.lease_expires_at < now,
+                        )
+                    ),
+                ),
+            )
+            .order_by(RunRecord.queued_at.asc(), RunRecord.created_at.asc())
+            .options(selectinload(RunRecord.evidence), selectinload(RunRecord.events))
+        )
+        run_record = self.session.execute(statement).scalars().first()
+        if run_record is None:
+            return None
+        lease_expires_at = now + timedelta(seconds=lease_seconds)
         run_record.status = RunLifecycleStatus.running.value
+        run_record.claimed_by = worker_id
+        run_record.started_at = run_record.started_at or now
+        run_record.last_heartbeat_at = now
+        run_record.lease_expires_at = lease_expires_at
+        run_record.attempt_count = (run_record.attempt_count or 0) + 1
+        self.session.commit()
+        self.append_event(
+            run_record.id,
+            event_type="run_claimed",
+            stage="lifecycle",
+            status=RunLifecycleStatus.running.value,
+            message="Run was claimed by worker.",
+            payload={
+                "worker_id": worker_id,
+                "lease_expires_at": lease_expires_at.isoformat(),
+                "attempt_count": run_record.attempt_count,
+            },
+        )
+        return self._get_run(run_record.id)
+
+    def mark_running(self, run_id: str, *, worker_id: str | None = None, lease_seconds: int | None = None) -> None:
+        run_record = self._get_run(run_id)
+        now = datetime.now(timezone.utc)
+        run_record.status = RunLifecycleStatus.running.value
+        run_record.started_at = run_record.started_at or now
+        if worker_id is not None:
+            run_record.claimed_by = worker_id
+            run_record.last_heartbeat_at = now
+        if lease_seconds is not None:
+            run_record.lease_expires_at = now + timedelta(seconds=lease_seconds)
         self.session.commit()
         self.append_event(
             run_id,
@@ -107,6 +175,22 @@ class RunRepository:
             status=RunLifecycleStatus.running.value,
             message="Run execution started.",
         )
+
+    def heartbeat_run(self, run_id: str, *, worker_id: str, lease_seconds: int) -> None:
+        run_record = self._get_run(run_id)
+        now = datetime.now(timezone.utc)
+        if run_record.claimed_by != worker_id:
+            raise ValueError(f"Run {run_id} is not claimed by worker {worker_id}.")
+        run_record.last_heartbeat_at = now
+        run_record.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        self.session.commit()
+
+    def release_run_claim(self, run_id: str) -> None:
+        run_record = self._get_run(run_id)
+        run_record.claimed_by = None
+        run_record.last_heartbeat_at = None
+        run_record.lease_expires_at = None
+        self.session.commit()
 
     def set_clarification_result(
         self,
@@ -123,6 +207,11 @@ class RunRepository:
             if clarification_result.needs_user_input
             else RunLifecycleStatus.running.value
         )
+        if clarification_result.needs_user_input:
+            run_record.completed_at = datetime.now(timezone.utc)
+            run_record.claimed_by = None
+            run_record.last_heartbeat_at = None
+            run_record.lease_expires_at = None
         self.session.commit()
         self.append_event(
             run_id,
@@ -202,6 +291,11 @@ class RunRepository:
             )
 
         run_record.status = final_status.value
+        run_record.completed_at = datetime.now(timezone.utc)
+        run_record.claimed_by = None
+        run_record.last_heartbeat_at = None
+        run_record.lease_expires_at = None
+        run_record.last_error = None
         run_record.coder_output = final_attempt.coder_output.model_dump(mode="json")
         run_record.policy_decision = final_attempt.policy_decision.model_dump(mode="json")
         run_record.clarification_result = (
@@ -242,6 +336,11 @@ class RunRepository:
     def fail_run(self, run_id: str, message: str, *, stage_summary: list[StageStatus] | None = None) -> RunDetail:
         run_record = self._get_run(run_id)
         run_record.status = RunLifecycleStatus.failed.value
+        run_record.completed_at = datetime.now(timezone.utc)
+        run_record.claimed_by = None
+        run_record.last_heartbeat_at = None
+        run_record.lease_expires_at = None
+        run_record.last_error = message
         run_record.stage_summary = [stage.model_dump(mode="json") for stage in (stage_summary or [])]
         self.session.commit()
         self.append_event(

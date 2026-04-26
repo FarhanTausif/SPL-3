@@ -7,6 +7,7 @@ from dehalu.core.settings import Settings
 from dehalu.orchestration import RunOrchestrator
 from dehalu.schemas import RunRequest
 from dehalu.state.repository import RunRepository
+from dehalu.worker import RunWorker
 
 
 def test_run_and_evidence_are_persisted(db_session: Session) -> None:
@@ -116,6 +117,15 @@ def test_advanced_run_persists_events_and_panel_evidence(db_session: Session) ->
         ),
         db_session,
     )
+    assert response.status.value == "queued"
+
+    worker = RunWorker(
+        settings=settings,
+        orchestrator=orchestrator,
+        session_factory=lambda: db_session,
+    )
+    assert worker.run_once() is True
+
     repository = RunRepository(db_session)
     detail = repository.get_run_detail(response.run_id)
     evidence = repository.get_run_evidence(response.run_id)
@@ -123,5 +133,5 @@ def test_advanced_run_persists_events_and_panel_evidence(db_session: Session) ->
 
     assert detail.status.value == "completed"
     assert detail.fused_metrics is not None
-    assert len(events) >= 3
+    assert len(events) >= 4
     assert {"tool", "panel", "fusion", "routing", "clarification"}.issubset({item.kind for item in evidence})

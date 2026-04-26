@@ -13,6 +13,7 @@ from dehalu.core.app import create_app
 from dehalu.core.settings import Settings
 from dehalu.orchestration import RunOrchestrator
 from dehalu.state.database import get_session
+from dehalu.worker import RunWorker
 
 pytestmark = pytest.mark.anyio
 
@@ -63,6 +64,7 @@ async def test_health_endpoint(client: AsyncClient) -> None:
     assert response.json()["providers"]["fake"] is True
     assert response.json()["orchestration"]["configured_mode"] == "direct"
     assert response.json()["orchestration"]["crewai_enabled"] is False
+    assert response.json()["orchestration"]["advanced_run_mode"] == "worker_backed"
 
 
 async def test_create_and_fetch_run(client: AsyncClient) -> None:
@@ -451,7 +453,7 @@ async def test_create_run_in_crewai_mode_supports_gemini_provider(
     assert len(payload["evidence_ids"]) == 7
 
 
-async def test_create_advanced_run_returns_completed_status_and_events(client: AsyncClient) -> None:
+async def test_create_advanced_run_returns_completed_status_and_events(client: AsyncClient, db_session: Session) -> None:
     response = await client.post(
         "/v1/runs",
         json={
@@ -465,9 +467,18 @@ async def test_create_advanced_run_returns_completed_status_and_events(client: A
     payload = response.json()
 
     assert response.status_code == 201
-    assert payload["status"] == "completed"
-    assert payload["clarification_result"]["language"] == "python"
-    assert payload["fused_metrics"]["overall_hallucination_score"] >= 0.0
+    assert payload["status"] == "queued"
+
+    session_factory = lambda: db_session
+    worker = RunWorker(
+        settings=Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None),
+        orchestrator=RunOrchestrator(
+            Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None),
+            build_provider_registry(Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)),
+        ),
+        session_factory=session_factory,
+    )
+    assert worker.run_once() is True
 
     detail_response = await client.get(f"/v1/runs/{payload['run_id']}")
     events_response = await client.get(f"/v1/runs/{payload['run_id']}/events")
@@ -479,14 +490,16 @@ async def test_create_advanced_run_returns_completed_status_and_events(client: A
 
     assert detail_response.status_code == 200
     assert detail["status"] == "completed"
+    assert detail["clarification_result"]["language"] == "python"
     assert events_response.status_code == 200
-    assert len(events) >= 3
+    assert len(events) >= 4
     assert events[0]["event_type"] == "run_created"
+    assert any(event["event_type"] == "run_claimed" for event in events)
     assert evidence_response.status_code == 200
     assert {"tool", "panel", "fusion", "routing", "clarification"}.issubset({item["kind"] for item in evidence})
 
 
-async def test_create_advanced_run_can_stop_for_clarification(client: AsyncClient) -> None:
+async def test_create_advanced_run_can_stop_for_clarification(client: AsyncClient, db_session: Session) -> None:
     response = await client.post(
         "/v1/runs",
         json={
@@ -499,8 +512,18 @@ async def test_create_advanced_run_can_stop_for_clarification(client: AsyncClien
     payload = response.json()
 
     assert response.status_code == 201
-    assert payload["status"] == "needs_clarification"
-    assert payload["coder_output"] is None
+    assert payload["status"] == "queued"
+
+    session_factory = lambda: db_session
+    worker = RunWorker(
+        settings=Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None),
+        orchestrator=RunOrchestrator(
+            Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None),
+            build_provider_registry(Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)),
+        ),
+        session_factory=session_factory,
+    )
+    assert worker.run_once() is True
 
     detail_response = await client.get(f"/v1/runs/{payload['run_id']}")
     events_response = await client.get(f"/v1/runs/{payload['run_id']}/events")

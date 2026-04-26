@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     cerebras_generate_model: str = "llama3.1-70b"
     cerebras_verify_model: str = "llama3.1-70b"
     cerebras_timeout_seconds: float = Field(default=15.0, gt=0.0)
+    worker_poll_interval_seconds: float = Field(default=1.0, gt=0.0, le=30.0)
+    worker_lease_seconds: int = Field(default=30, ge=5, le=300)
+    worker_max_retries: int = Field(default=3, ge=1, le=20)
+    worker_batch_size: int = Field(default=1, ge=1, le=20)
+    worker_id: str = "dehalu-worker-1"
 
     @field_validator(
         "default_provider",
