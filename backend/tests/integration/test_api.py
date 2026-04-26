@@ -61,6 +61,8 @@ async def test_health_endpoint(client: AsyncClient) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert response.json()["providers"]["fake"] is True
+    assert response.json()["orchestration"]["configured_mode"] == "direct"
+    assert response.json()["orchestration"]["crewai_enabled"] is False
 
 
 async def test_create_and_fetch_run(client: AsyncClient) -> None:
@@ -85,7 +87,8 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
 
     evidence_response = await client.get(f"/v1/runs/{run_id}/evidence")
     assert evidence_response.status_code == 200
-    assert {item["kind"] for item in evidence_response.json()} == {
+    evidence = evidence_response.json()
+    assert {item["kind"] for item in evidence} == {
         "claim_extraction",
         "static_analysis",
         "sandbox",
@@ -93,6 +96,9 @@ async def test_create_and_fetch_run(client: AsyncClient) -> None:
         "cove",
         "policy",
     }
+    claim_evidence = next(item for item in evidence if item["kind"] == "claim_extraction")
+    assert claim_evidence["payload"]["orchestration_mode"] == "direct"
+    assert claim_evidence["payload"]["stage"] == "extract_claims"
 
 
 async def test_create_run_rejects_unknown_provider(client: AsyncClient) -> None:
@@ -287,7 +293,29 @@ async def test_create_run_in_crewai_mode_matches_direct_for_clean_fake(
     assert response.status_code == 201
     assert payload["policy_decision"]["state"] == "accept"
     assert payload["repair_result"]["outcome"] == "skipped"
-    assert len(payload["evidence_ids"]) == 6
+    assert len(payload["evidence_ids"]) == 7
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as evidence_client:
+        evidence_response = await evidence_client.get(f"/v1/runs/{payload['run_id']}/evidence")
+
+    evidence = evidence_response.json()
+
+    assert evidence_response.status_code == 200
+    assert {item["kind"] for item in evidence} == {
+        "claim_extraction",
+        "static_analysis",
+        "sandbox",
+        "judge",
+        "cove",
+        "policy",
+        "orchestration",
+    }
+    orchestration_evidence = next(item for item in evidence if item["kind"] == "orchestration")
+    assert orchestration_evidence["payload"]["orchestration_mode"] == "crewai"
+    assert orchestration_evidence["payload"]["entry_count"] > 0
 
 
 async def test_create_run_in_crewai_mode_repairs_fake_output(
@@ -316,7 +344,7 @@ async def test_create_run_in_crewai_mode_repairs_fake_output(
     assert response.status_code == 201
     assert payload["policy_decision"]["state"] == "accept"
     assert payload["repair_result"]["outcome"] == "succeeded"
-    assert len(payload["evidence_ids"]) == 13
+    assert len(payload["evidence_ids"]) == 14
 
 
 async def test_create_run_in_crewai_mode_fails_closed_on_bad_repair(
@@ -349,7 +377,7 @@ async def test_create_run_in_crewai_mode_fails_closed_on_bad_repair(
     assert response.status_code == 201
     assert payload["policy_decision"]["state"] == "reject"
     assert payload["repair_result"]["outcome"] == "failed"
-    assert len(payload["evidence_ids"]) == 13
+    assert len(payload["evidence_ids"]) == 14
 
 
 async def test_create_run_in_crewai_mode_supports_gemini_provider(
@@ -420,4 +448,4 @@ async def test_create_run_in_crewai_mode_supports_gemini_provider(
     assert payload["judge_result"]["provider"] == "gemini"
     assert payload["cove_result"]["provider"] == "gemini"
     assert payload["repair_result"]["outcome"] == "skipped"
-    assert len(payload["evidence_ids"]) == 6
+    assert len(payload["evidence_ids"]) == 7

@@ -32,6 +32,7 @@ def test_run_and_evidence_are_persisted(db_session: Session) -> None:
         "policy": 1,
     }
     assert len(evidence) == 6
+    assert all(item.payload["orchestration_mode"] == "direct" for item in evidence if item.kind != "repair")
 
 
 def test_repair_run_persists_both_attempts_and_repair_evidence(db_session: Session) -> None:
@@ -94,5 +95,9 @@ def test_crewai_mode_preserves_run_detail_and_evidence_summary(db_session: Sessi
         "cove": 2,
         "repair": 1,
         "policy": 2,
+        "orchestration": 1,
     }
-    assert len(evidence) == 13
+    assert len(evidence) == 14
+    orchestration = next(item for item in evidence if item.kind == "orchestration")
+    assert orchestration.payload["orchestration_mode"] == "crewai"
+    assert orchestration.payload["entry_count"] > 0

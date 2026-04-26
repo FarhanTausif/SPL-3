@@ -10,9 +10,11 @@ from sqlalchemy.orm import Session, selectinload
 from dehalu.schemas import (
     CoderOutput,
     CoVeResult,
+    EvidenceKind,
     ExtractedClaim,
     JudgeResult,
     NormalizedRequest,
+    OrchestrationTraceEntry,
     PolicyDecision,
     RepairOutcome,
     RepairResult,
@@ -52,11 +54,19 @@ class RunRepository:
         final_attempt: EvaluationBundle,
         repair_result: RepairResult,
         original_attempt: EvaluationBundle | None = None,
+        orchestration_mode: str = "direct",
+        orchestration_trace: list[OrchestrationTraceEntry] | None = None,
     ) -> RunResponse:
         run_id = str(uuid4())
         evidence_records: list[EvidenceRecord] = []
         if original_attempt is not None:
-            evidence_records.extend(self._build_attempt_evidence(run_id, original_attempt))
+            evidence_records.extend(
+                self._build_attempt_evidence(
+                    run_id,
+                    original_attempt,
+                    orchestration_mode=orchestration_mode,
+                )
+            )
 
         if repair_result.outcome != RepairOutcome.skipped:
             for repair_attempt in repair_result.attempts:
@@ -64,12 +74,45 @@ class RunRepository:
                     EvidenceRecord(
                         id=str(uuid4()),
                         run_id=run_id,
-                        kind="repair",
+                        kind=EvidenceKind.repair.value,
                         payload=repair_attempt.model_dump(mode="json"),
                     )
                 )
 
-        evidence_records.extend(self._build_attempt_evidence(run_id, final_attempt))
+        evidence_records.extend(
+            self._build_attempt_evidence(
+                run_id,
+                final_attempt,
+                orchestration_mode=orchestration_mode,
+            )
+        )
+        if orchestration_trace:
+            evidence_records.append(
+                EvidenceRecord(
+                    id=str(uuid4()),
+                    run_id=run_id,
+                    kind=EvidenceKind.orchestration.value,
+                    payload={
+                        "orchestration_mode": orchestration_mode,
+                        "entry_count": len(orchestration_trace),
+                        "entries": [
+                            {
+                                "sequence": entry.sequence,
+                                "task_name": entry.task_name,
+                                "stage": entry.stage,
+                                "agent_role": entry.agent_role,
+                                "status": entry.status,
+                                "attempt_number": entry.attempt_number,
+                                "attempt_stage": entry.attempt_stage,
+                                "output_key": entry.output_key,
+                                "audit_label": entry.audit_label,
+                                "detail": entry.detail,
+                            }
+                            for entry in orchestration_trace
+                        ],
+                    },
+                )
+            )
         run_record = RunRecord(
             id=run_id,
             prompt=normalized_request.prompt,
@@ -99,18 +142,27 @@ class RunRepository:
             evidence_ids=[record.id for record in evidence_records],
         )
 
-    def _build_attempt_evidence(self, run_id: str, attempt: EvaluationBundle) -> list[EvidenceRecord]:
+    def _build_attempt_evidence(
+        self,
+        run_id: str,
+        attempt: EvaluationBundle,
+        *,
+        orchestration_mode: str,
+    ) -> list[EvidenceRecord]:
         attempt_metadata = {
             "attempt_number": attempt.attempt_number,
             "attempt_stage": attempt.attempt_stage,
+            "orchestration_mode": orchestration_mode,
         }
         return [
             EvidenceRecord(
                 id=str(uuid4()),
                 run_id=run_id,
-                kind="claim_extraction",
+                kind=EvidenceKind.claim_extraction.value,
                 payload={
                     **attempt_metadata,
+                    "stage": "extract_claims",
+                    "task_name": f"{attempt.attempt_stage}_extract_claims",
                     "claims": [claim.model_dump(mode="json") for claim in attempt.extracted_claims],
                     "claim_count": len(attempt.extracted_claims),
                 },
@@ -118,9 +170,11 @@ class RunRepository:
             EvidenceRecord(
                 id=str(uuid4()),
                 run_id=run_id,
-                kind="static_analysis",
+                kind=EvidenceKind.static_analysis.value,
                 payload={
                     **attempt_metadata,
+                    "stage": "static_analysis",
+                    "task_name": f"{attempt.attempt_stage}_static_analysis",
                     "findings": [finding.model_dump(mode="json") for finding in attempt.static_findings],
                     "finding_count": len(attempt.static_findings),
                 },
@@ -128,36 +182,44 @@ class RunRepository:
             EvidenceRecord(
                 id=str(uuid4()),
                 run_id=run_id,
-                kind="sandbox",
+                kind=EvidenceKind.sandbox.value,
                 payload={
                     **attempt_metadata,
+                    "stage": "sandbox_verify",
+                    "task_name": f"{attempt.attempt_stage}_sandbox_verify",
                     **attempt.sandbox_result.model_dump(mode="json"),
                 },
             ),
             EvidenceRecord(
                 id=str(uuid4()),
                 run_id=run_id,
-                kind="judge",
+                kind=EvidenceKind.judge.value,
                 payload={
                     **attempt_metadata,
+                    "stage": "judge",
+                    "task_name": f"{attempt.attempt_stage}_judge_output",
                     **attempt.judge_result.model_dump(mode="json"),
                 },
             ),
             EvidenceRecord(
                 id=str(uuid4()),
                 run_id=run_id,
-                kind="cove",
+                kind=EvidenceKind.cove.value,
                 payload={
                     **attempt_metadata,
+                    "stage": "cove",
+                    "task_name": f"{attempt.attempt_stage}_cove_output",
                     **attempt.cove_result.model_dump(mode="json"),
                 },
             ),
             EvidenceRecord(
                 id=str(uuid4()),
                 run_id=run_id,
-                kind="policy",
+                kind=EvidenceKind.policy.value,
                 payload={
                     **attempt_metadata,
+                    "stage": "policy_decide",
+                    "task_name": f"{attempt.attempt_stage}_policy_decide",
                     **attempt.policy_decision.model_dump(mode="json"),
                 },
             ),

@@ -73,6 +73,7 @@ class EvidenceKind(StrEnum):
     cove = "cove"
     repair = "repair"
     policy = "policy"
+    orchestration = "orchestration"
 
 
 class RunRequest(BaseModel):
@@ -214,6 +215,19 @@ class VerificationEvidence(BaseModel):
     created_at: datetime | None = None
 
 
+class OrchestrationTraceEntry(BaseModel):
+    sequence: int = Field(ge=1)
+    task_name: str
+    stage: str
+    agent_role: str
+    status: str
+    attempt_number: int = Field(ge=1)
+    attempt_stage: str
+    output_key: str | None = None
+    audit_label: str | None = None
+    detail: str | None = None
+
+
 class PolicyDecision(BaseModel):
     state: PolicyDecisionState
     reasons: list[str] = Field(default_factory=list)
@@ -250,3 +264,4 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     providers: dict[str, bool]
+    orchestration: dict[str, Any] = Field(default_factory=dict)

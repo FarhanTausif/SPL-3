@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from dehalu.agents.compat import HAS_CREWAI
 from dehalu.adapters.llm.registry import UnknownProviderError
 from dehalu.api.dependencies import (
     get_app_settings,
@@ -29,6 +30,11 @@ async def health(
         status=status_value,
         version=settings.app_version,
         providers=provider_health,
+        orchestration={
+            "configured_mode": settings.orchestration_mode,
+            "crewai_available": HAS_CREWAI,
+            "crewai_enabled": settings.orchestration_mode == "crewai" and HAS_CREWAI,
+        },
     )
 
 

@@ -64,4 +64,6 @@ class RunOrchestrator:
             ),
             final_attempt=execution_result.final_attempt,
             repair_result=execution_result.repair_result,
+            orchestration_mode=self.settings.orchestration_mode,
+            orchestration_trace=execution_result.orchestration_trace,
         )
