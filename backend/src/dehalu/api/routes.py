@@ -12,7 +12,7 @@ from dehalu.api.dependencies import (
 )
 from dehalu.core.settings import Settings
 from dehalu.orchestration import RunOrchestrator
-from dehalu.schemas import HealthResponse, RunDetail, RunRequest, RunResponse, VerificationEvidence
+from dehalu.schemas import HealthResponse, RunDetail, RunEvent, RunRequest, RunResponse, VerificationEvidence
 from dehalu.state.database import get_session
 from dehalu.state.repository import RunNotFoundError, RunRepository
 
@@ -34,6 +34,7 @@ async def health(
             "configured_mode": settings.orchestration_mode,
             "crewai_available": HAS_CREWAI,
             "crewai_enabled": settings.orchestration_mode == "crewai" and HAS_CREWAI,
+            "advanced_run_mode": True,
         },
     )
 
@@ -57,10 +58,10 @@ async def create_run(
 async def get_run(
     run_id: str,
     session: Session = Depends(get_session),
+    orchestrator: RunOrchestrator = Depends(get_orchestrator),
 ) -> RunDetail:
-    repository = RunRepository(session)
     try:
-        return repository.get_run_detail(run_id)
+        return orchestrator.get_run_detail(run_id, session)
     except RunNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found") from exc
 
@@ -73,5 +74,17 @@ async def get_evidence(
     repository = RunRepository(session)
     try:
         return repository.get_run_evidence(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found") from exc
+
+
+@router.get("/v1/runs/{run_id}/events", response_model=list[RunEvent])
+async def get_run_events(
+    run_id: str,
+    session: Session = Depends(get_session),
+    orchestrator: RunOrchestrator = Depends(get_orchestrator),
+) -> list[RunEvent]:
+    try:
+        return orchestrator.get_run_events(run_id, session)
     except RunNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found") from exc

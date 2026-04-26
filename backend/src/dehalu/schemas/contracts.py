@@ -65,6 +65,19 @@ class PolicyDecisionState(StrEnum):
     clarify = "clarify"
 
 
+class RunMode(StrEnum):
+    basic = "basic"
+    advanced = "advanced"
+
+
+class RunLifecycleStatus(StrEnum):
+    queued = "queued"
+    running = "running"
+    needs_clarification = "needs_clarification"
+    completed = "completed"
+    failed = "failed"
+
+
 class EvidenceKind(StrEnum):
     claim_extraction = "claim_extraction"
     static_analysis = "static_analysis"
@@ -74,6 +87,27 @@ class EvidenceKind(StrEnum):
     repair = "repair"
     policy = "policy"
     orchestration = "orchestration"
+    clarification = "clarification"
+    tool = "tool"
+    panel = "panel"
+    fusion = "fusion"
+    routing = "routing"
+
+
+class AgentRole(StrEnum):
+    clarifier = "clarifier"
+    coder = "coder"
+    judge = "judge"
+    cove = "cove"
+    repair = "repair"
+
+
+class ToolPolicy(BaseModel):
+    max_calls_per_role: int = Field(default=3, ge=0, le=20)
+    timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    allow_repo_context: bool = True
+    allow_web_lookup: bool = True
+    allowed_domains: list[str] = Field(default_factory=list)
 
 
 class RunRequest(BaseModel):
@@ -82,6 +116,11 @@ class RunRequest(BaseModel):
     risk_level: RiskLevel = RiskLevel.medium
     latency_budget_seconds: int = Field(default=15, ge=1, le=120)
     provider: str | None = None
+    run_mode: RunMode = RunMode.basic
+    target_runtime: str | None = None
+    framework_hint: str | None = None
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    tool_policy: ToolPolicy | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -106,6 +145,11 @@ class NormalizedRequest(BaseModel):
     risk_level: RiskLevel
     latency_budget_seconds: int
     provider: str
+    run_mode: RunMode = RunMode.basic
+    target_runtime: str | None = None
+    framework_hint: str | None = None
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    tool_policy: ToolPolicy | None = None
 
 
 class CoderOutput(BaseModel):
@@ -228,6 +272,69 @@ class OrchestrationTraceEntry(BaseModel):
     detail: str | None = None
 
 
+class ClarificationResult(BaseModel):
+    clarified_prompt: str
+    requested_outcome: str
+    language: str
+    runtime_assumptions: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    ambiguity_flags: list[str] = Field(default_factory=list)
+    needs_user_input: bool = False
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolInvocationRecord(BaseModel):
+    tool_name: str
+    agent_role: AgentRole
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    summary: str
+    duration_ms: float = Field(ge=0.0)
+    changed_verdict: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelVerdict(BaseModel):
+    stage: str
+    providers: list[str] = Field(default_factory=list)
+    judge_results: list[JudgeResult] = Field(default_factory=list)
+    cove_results: list[CoVeResult] = Field(default_factory=list)
+    disagreement_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    consensus_verdict: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class FusedHallucinationMetrics(BaseModel):
+    requirement_alignment_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    dependency_plausibility_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    api_symbol_validity_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    unsupported_assumption_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    execution_validity_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    judge_disagreement_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    tool_supported_claim_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    overall_hallucination_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StageStatus(BaseModel):
+    stage: str
+    status: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunEvent(BaseModel):
+    sequence: int = Field(ge=1)
+    event_type: str
+    stage: str
+    status: str
+    message: str
+    created_at: datetime | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class PolicyDecision(BaseModel):
     state: PolicyDecisionState
     reasons: list[str] = Field(default_factory=list)
@@ -239,15 +346,19 @@ class PolicyDecision(BaseModel):
 class RunResponse(BaseModel):
     run_id: str
     normalized_request: NormalizedRequest
-    coder_output: CoderOutput
-    extracted_claims: list[ExtractedClaim]
-    static_findings: list[StaticFinding]
-    sandbox_result: SandboxResult
-    judge_result: JudgeResult
-    cove_result: CoVeResult
-    repair_result: RepairResult
-    policy_decision: PolicyDecision
-    evidence_ids: list[str]
+    status: RunLifecycleStatus = RunLifecycleStatus.completed
+    stage_summary: list[StageStatus] = Field(default_factory=list)
+    clarification_result: ClarificationResult | None = None
+    fused_metrics: FusedHallucinationMetrics | None = None
+    coder_output: CoderOutput | None = None
+    extracted_claims: list[ExtractedClaim] = Field(default_factory=list)
+    static_findings: list[StaticFinding] = Field(default_factory=list)
+    sandbox_result: SandboxResult | None = None
+    judge_result: JudgeResult | None = None
+    cove_result: CoVeResult | None = None
+    repair_result: RepairResult | None = None
+    policy_decision: PolicyDecision | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 class RunDetail(BaseModel):
@@ -256,7 +367,11 @@ class RunDetail(BaseModel):
     run_id: str
     created_at: datetime
     normalized_request: NormalizedRequest
-    policy_decision: PolicyDecision
+    status: RunLifecycleStatus = RunLifecycleStatus.completed
+    policy_decision: PolicyDecision | None = None
+    clarification_result: ClarificationResult | None = None
+    fused_metrics: FusedHallucinationMetrics | None = None
+    stage_summary: list[StageStatus] = Field(default_factory=list)
     evidence_summary: dict[str, int]
 
 

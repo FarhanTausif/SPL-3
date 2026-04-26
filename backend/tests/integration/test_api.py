@@ -449,3 +449,62 @@ async def test_create_run_in_crewai_mode_supports_gemini_provider(
     assert payload["cove_result"]["provider"] == "gemini"
     assert payload["repair_result"]["outcome"] == "skipped"
     assert len(payload["evidence_ids"]) == 7
+
+
+async def test_create_advanced_run_returns_completed_status_and_events(client: AsyncClient) -> None:
+    response = await client.post(
+        "/v1/runs",
+        json={
+            "prompt": "Write Python code that computes a square root.",
+            "provider": "fake",
+            "run_mode": "advanced",
+            "acceptance_criteria": ["Use math.sqrt."],
+        },
+    )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["status"] == "completed"
+    assert payload["clarification_result"]["language"] == "python"
+    assert payload["fused_metrics"]["overall_hallucination_score"] >= 0.0
+
+    detail_response = await client.get(f"/v1/runs/{payload['run_id']}")
+    events_response = await client.get(f"/v1/runs/{payload['run_id']}/events")
+    evidence_response = await client.get(f"/v1/runs/{payload['run_id']}/evidence")
+
+    detail = detail_response.json()
+    events = events_response.json()
+    evidence = evidence_response.json()
+
+    assert detail_response.status_code == 200
+    assert detail["status"] == "completed"
+    assert events_response.status_code == 200
+    assert len(events) >= 3
+    assert events[0]["event_type"] == "run_created"
+    assert evidence_response.status_code == 200
+    assert {"tool", "panel", "fusion", "routing", "clarification"}.issubset({item["kind"] for item in evidence})
+
+
+async def test_create_advanced_run_can_stop_for_clarification(client: AsyncClient) -> None:
+    response = await client.post(
+        "/v1/runs",
+        json={
+            "prompt": "Maybe write something for Python, whatever works.",
+            "provider": "fake",
+            "run_mode": "advanced",
+        },
+    )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["status"] == "needs_clarification"
+    assert payload["coder_output"] is None
+
+    detail_response = await client.get(f"/v1/runs/{payload['run_id']}")
+    events_response = await client.get(f"/v1/runs/{payload['run_id']}/events")
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["status"] == "needs_clarification"
+    assert any(event["event_type"] == "clarification_completed" for event in events_response.json())

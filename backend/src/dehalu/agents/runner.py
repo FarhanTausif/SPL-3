@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dehalu.agents.compat import Agent, Crew, HAS_CREWAI, Process, Task
+from dataclasses import dataclass
+
+from dehalu.agents.compat import Agent, HAS_CREWAI, Task
 from dehalu.agents.contracts import CrewExecutionContext, CrewTaskSpec
 from dehalu.agents.roles import (
     CLAIM_EXTRACTOR_AGENT,
@@ -22,6 +24,12 @@ ROLE_DEFINITIONS = {
     REPAIR_AGENT["role"]: REPAIR_AGENT,
     POLICY_COORDINATOR_AGENT["role"]: POLICY_COORDINATOR_AGENT,
 }
+
+
+@dataclass(slots=True)
+class _CrewPlan:
+    agents: list[Agent]
+    tasks: list[Task]
 
 
 class CrewAIRunner:
@@ -91,7 +99,7 @@ class CrewAIRunner:
             )
         return context
 
-    def _build_crew(self, task_specs: list[CrewTaskSpec]) -> Crew:
+    def _build_crew(self, task_specs: list[CrewTaskSpec]) -> _CrewPlan:
         agents_by_role = {
             role: Agent(verbose=self.verbose, allow_delegation=False, **definition)
             for role, definition in ROLE_DEFINITIONS.items()
@@ -106,9 +114,4 @@ class CrewAIRunner:
             for task_spec in task_specs
         ]
         agents = list({task.agent.role: task.agent for task in tasks}.values())
-        return Crew(
-            agents=agents,
-            tasks=tasks,
-            process=Process.sequential,
-            verbose=self.verbose,
-        )
+        return _CrewPlan(agents=agents, tasks=tasks)

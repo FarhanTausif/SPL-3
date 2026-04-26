@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from time import perf_counter
 from typing import Any
 
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from dehalu.core.settings import Settings
 from dehalu.schemas import (
+    ClarificationResult,
     CoderOutput,
     CoVeClaimCheck,
     CoVeFinding,
@@ -84,6 +86,47 @@ class GeminiLLMProvider:
             files_touched=[],
             execution_notes=["No runtime execution was performed in this iteration."],
         )
+
+    def clarify(self, request: NormalizedRequest) -> ClarificationResult:
+        prompt = (
+            "Normalize the coding request into a structured task spec.\n"
+            "Return strict JSON with requested_outcome, language, runtime_assumptions, "
+            "constraints, acceptance_criteria, ambiguity_flags, needs_user_input, confidence.\n"
+            f"Request:\n{request.model_dump_json(indent=2)}\n"
+        )
+        try:
+            response = self._generate_content(
+                model=self.verify_model,
+                system_instruction="You clarify software requests before generation. Return strict JSON only.",
+                prompt=prompt,
+                generation_config={"temperature": 0.0, "responseMimeType": "application/json"},
+            )
+            payload = json.loads(self._extract_text(response))
+            return ClarificationResult(
+                clarified_prompt=request.prompt,
+                requested_outcome=payload.get("requested_outcome", request.prompt),
+                language=payload.get("language", request.language),
+                runtime_assumptions=payload.get("runtime_assumptions", []),
+                constraints=payload.get("constraints", []),
+                acceptance_criteria=payload.get("acceptance_criteria", request.acceptance_criteria),
+                ambiguity_flags=payload.get("ambiguity_flags", []),
+                needs_user_input=payload.get("needs_user_input", False),
+                confidence=payload.get("confidence", 0.5),
+                metadata={"provider": self.name, "model": self.verify_model},
+            )
+        except (ValueError, httpx.HTTPError, json.JSONDecodeError):
+            return ClarificationResult(
+                clarified_prompt=request.prompt,
+                requested_outcome=request.prompt,
+                language=request.language,
+                runtime_assumptions=[],
+                constraints=[],
+                acceptance_criteria=request.acceptance_criteria,
+                ambiguity_flags=[],
+                needs_user_input=False,
+                confidence=0.35,
+                metadata={"provider": self.name, "model": self.verify_model, "fallback": True},
+            )
 
     def judge(
         self,

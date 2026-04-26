@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from dehalu.schemas import (
+    ClarificationResult,
     CoderOutput,
     CoVeResult,
     ExtractedClaim,
@@ -16,6 +17,9 @@ from dehalu.schemas import (
 
 class LLMProvider(Protocol):
     name: str
+
+    def clarify(self, request: NormalizedRequest) -> ClarificationResult:
+        raise NotImplementedError("Clarification support is deferred to a later backend iteration.")
 
     def generate(self, request: NormalizedRequest) -> CoderOutput:
         raise NotImplementedError

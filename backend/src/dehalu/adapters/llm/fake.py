@@ -3,6 +3,7 @@ from __future__ import annotations
 from time import perf_counter
 
 from dehalu.schemas import (
+    ClarificationResult,
     CoderOutput,
     CoVeCheckVerdict,
     CoVeClaimCheck,
@@ -26,6 +27,24 @@ UNSAFE_TOKENS = ("eval", "exec", "os.system", "subprocess")
 class FakeLLMProvider:
     name = "fake"
     model = "fake-deterministic-coder-v1"
+
+    def clarify(self, request: NormalizedRequest) -> ClarificationResult:
+        ambiguity_flags: list[str] = []
+        lowered = request.prompt.lower()
+        if "something" in lowered or "maybe" in lowered or "whatever" in lowered:
+            ambiguity_flags.append("underspecified_request")
+        return ClarificationResult(
+            clarified_prompt=request.prompt,
+            requested_outcome=request.prompt,
+            language=request.language,
+            runtime_assumptions=[request.target_runtime] if request.target_runtime else [],
+            constraints=[f"framework={request.framework_hint}"] if request.framework_hint else [],
+            acceptance_criteria=request.acceptance_criteria,
+            ambiguity_flags=ambiguity_flags,
+            needs_user_input=bool(ambiguity_flags),
+            confidence=0.45 if ambiguity_flags else 0.9,
+            metadata={"provider": self.name, "model": self.model},
+        )
 
     def generate(self, request: NormalizedRequest) -> CoderOutput:
         prompt = request.prompt.lower()

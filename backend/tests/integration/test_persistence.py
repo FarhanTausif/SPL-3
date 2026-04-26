@@ -101,3 +101,27 @@ def test_crewai_mode_preserves_run_detail_and_evidence_summary(db_session: Sessi
     orchestration = next(item for item in evidence if item.kind == "orchestration")
     assert orchestration.payload["orchestration_mode"] == "crewai"
     assert orchestration.payload["entry_count"] > 0
+
+
+def test_advanced_run_persists_events_and_panel_evidence(db_session: Session) -> None:
+    settings = Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)
+    orchestrator = RunOrchestrator(settings, build_provider_registry(settings))
+
+    response = orchestrator.run(
+        RunRequest(
+            prompt="Write Python code that computes a square root.",
+            provider="fake",
+            run_mode="advanced",
+            acceptance_criteria=["Use math.sqrt."],
+        ),
+        db_session,
+    )
+    repository = RunRepository(db_session)
+    detail = repository.get_run_detail(response.run_id)
+    evidence = repository.get_run_evidence(response.run_id)
+    events = repository.get_run_events(response.run_id)
+
+    assert detail.status.value == "completed"
+    assert detail.fused_metrics is not None
+    assert len(events) >= 3
+    assert {"tool", "panel", "fusion", "routing", "clarification"}.issubset({item.kind for item in evidence})
