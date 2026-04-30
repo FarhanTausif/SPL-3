@@ -29,6 +29,15 @@ class ProviderRegistry:
     def health(self) -> dict[str, bool]:
         return {name: provider.healthcheck() for name, provider in self._providers.items()}
 
+    def health_details(self) -> dict[str, dict]:
+        details: dict[str, dict] = {}
+        for name, provider in self._providers.items():
+            if hasattr(provider, "health_details"):
+                details[name] = provider.health_details()
+            else:
+                details[name] = {"configured": provider.healthcheck(), "api_key_present": provider.healthcheck()}
+        return details
+
 
 def build_provider_registry(
     settings: Settings | None = None,
@@ -52,6 +61,11 @@ def build_provider_registry(
                 verify_model=settings.grok_verify_model,
                 timeout_seconds=settings.grok_timeout_seconds,
                 http_client=grok_http_client,
+                retry_attempts=settings.grok_retry_attempts,
+                prompt_policy_version=settings.prompt_policy_version,
+                routing_policy_version=settings.routing_policy_version,
+                capture_full_payloads=settings.provider_capture_full_payloads,
+                smoke_checks_enabled=settings.provider_live_smoke_checks_enabled,
             )
         )
     if settings.mistral_enabled:
@@ -64,6 +78,11 @@ def build_provider_registry(
                 verify_model=settings.mistral_verify_model,
                 timeout_seconds=settings.mistral_timeout_seconds,
                 http_client=mistral_http_client,
+                retry_attempts=settings.mistral_retry_attempts,
+                prompt_policy_version=settings.prompt_policy_version,
+                routing_policy_version=settings.routing_policy_version,
+                capture_full_payloads=settings.provider_capture_full_payloads,
+                smoke_checks_enabled=settings.provider_live_smoke_checks_enabled,
             )
         )
     if settings.cerebras_enabled:
@@ -76,6 +95,11 @@ def build_provider_registry(
                 verify_model=settings.cerebras_verify_model,
                 timeout_seconds=settings.cerebras_timeout_seconds,
                 http_client=cerebras_http_client,
+                retry_attempts=settings.cerebras_retry_attempts,
+                prompt_policy_version=settings.prompt_policy_version,
+                routing_policy_version=settings.routing_policy_version,
+                capture_full_payloads=settings.provider_capture_full_payloads,
+                smoke_checks_enabled=settings.provider_live_smoke_checks_enabled,
             )
         )
     return ProviderRegistry(providers)

@@ -17,3 +17,6 @@ __pycache__/
 
 # Codex Instructions
 .codex
+
+# vscode settings
+.vscode/*

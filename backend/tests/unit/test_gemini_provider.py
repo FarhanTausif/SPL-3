@@ -111,7 +111,9 @@ def test_gemini_generate_judge_and_cove_parse_mocked_http() -> None:
     cove_result = provider.cove(request, output, [], [], _sandbox_result(), judge_result)
 
     assert output.code == "print('ok')"
+    assert output.metadata["provider_invocation"]["success"] is True
     assert judge_result.verdict == JudgeVerdict.pass_
+    assert judge_result.metrics["provider_invocation"]["success"] is True
     assert cove_result.verdict.value == "pass"
     assert cove_result.checks[0].claim == "print('ok')"
     assert requests[1].url.path.endswith(":generateContent")
@@ -133,6 +135,7 @@ def test_gemini_judge_turns_malformed_json_into_warning_finding() -> None:
 
     assert result.verdict == JudgeVerdict.uncertain
     assert any(finding.code == "judge_provider_error" for finding in result.findings)
+    assert result.metrics["provider_invocation"]["failure_kind"] == "malformed_output"
 
 
 def test_gemini_cove_turns_malformed_json_into_warning_finding() -> None:

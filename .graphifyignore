@@ -1,4 +1,29 @@
-# Ignore everything except Papers Directory
-*
-!Papers/
-!Papers/**
+# Ignore Papers directory
+Papers/
+
+# Anything related to graphify
+graphify-out/
+
+# Virtual Environment
+venv/
+
+# __pycache__ folders
+__pycache__/
+
+# Bytes-compiled files
+*.pyc
+*.pyo
+*.pyd
+
+# pytest cache
+.pytest_cache/
+
+# Copilot Instructions
+.github/copilot-instructions.md
+
+# Codex Instructions
+.codex
+
+# vscode settings
+.vscode/*
+

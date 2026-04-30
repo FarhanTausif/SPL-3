@@ -57,3 +57,6 @@ class LLMProvider(Protocol):
 
     def healthcheck(self) -> bool:
         raise NotImplementedError
+
+    def health_details(self) -> dict:
+        raise NotImplementedError

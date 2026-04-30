@@ -180,7 +180,10 @@ class _ExecutionStages:
             input_code=context.initial_attempt.coder_output.code,
             output_code=repaired_output.code,
             summary=_summarize_repair(context.initial_attempt.coder_output, repaired_output),
-            metadata={"execution_notes": repaired_output.execution_notes},
+            metadata={
+                "execution_notes": repaired_output.execution_notes,
+                "provider_invocation": repaired_output.metadata.get("provider_invocation"),
+            },
         )
         context.set_artifact(REPAIR_ATTEMPT, repair_attempt)
         context.reset_attempt_state(

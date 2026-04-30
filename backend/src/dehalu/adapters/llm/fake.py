@@ -284,6 +284,16 @@ class FakeLLMProvider:
     def healthcheck(self) -> bool:
         return True
 
+    def health_details(self) -> dict:
+        return {
+            "configured": True,
+            "api_key_present": False,
+            "smoke_check_enabled": False,
+            "live_smoke_check": "skipped",
+            "models": {"generate": self.model, "verify": self.model},
+            "retry_attempts": 0,
+        }
+
     def _verify_claim(
         self,
         claim: ExtractedClaim,

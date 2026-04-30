@@ -134,4 +134,6 @@ def test_advanced_run_persists_events_and_panel_evidence(db_session: Session) ->
     assert detail.status.value == "completed"
     assert detail.fused_metrics is not None
     assert len(events) >= 4
-    assert {"tool", "panel", "fusion", "routing", "clarification"}.issubset({item.kind for item in evidence})
+    assert {"tool", "panel", "fusion", "routing", "clarification", "provider_invocation"}.issubset(
+        {item.kind for item in evidence}
+    )

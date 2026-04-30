@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from dehalu.adapters.llm import ProviderRegistry
 from dehalu.adapters.llm.base import LLMProvider
+from dehalu.core.settings import Settings
 from dehalu.schemas import JudgeResult
 
 
@@ -13,6 +14,7 @@ class ProviderRoleMatrix:
     generation: tuple[str, ...] = ("grok", "gemini")
     judges: tuple[str, ...] = ("gemini", "mistral", "cerebras")
     cove: tuple[str, ...] = ("mistral", "gemini")
+    repair: tuple[str, ...] = ("gemini", "mistral", "cerebras", "grok")
 
 
 @dataclass(slots=True)
@@ -23,17 +25,53 @@ class RepairSelection:
 
 
 class ProviderRouter:
-    def __init__(self, providers: ProviderRegistry, matrix: ProviderRoleMatrix | None = None) -> None:
+    def __init__(
+        self,
+        providers: ProviderRegistry,
+        matrix: ProviderRoleMatrix | None = None,
+        *,
+        routing_policy_version: str = "v1",
+    ) -> None:
         self.providers = providers
         self.matrix = matrix or ProviderRoleMatrix()
+        self.routing_policy_version = routing_policy_version
+
+    @classmethod
+    def from_settings(cls, providers: ProviderRegistry, settings: Settings) -> "ProviderRouter":
+        matrix = ProviderRoleMatrix(
+            clarification=settings.clarification_provider_order,
+            generation=settings.generation_provider_order,
+            judges=settings.judge_provider_order,
+            cove=settings.cove_provider_order,
+            repair=settings.repair_provider_order,
+        )
+        return cls(
+            providers,
+            matrix,
+            routing_policy_version=settings.routing_policy_version,
+        )
 
     def get_clarification_provider(self) -> LLMProvider:
         return self._first_available(self.matrix.clarification)
+
+    def get_clarification_candidates(self) -> list[LLMProvider]:
+        return self._available(self.matrix.clarification)
 
     def get_generation_provider(self, requested_provider: str | None = None) -> LLMProvider:
         if requested_provider and requested_provider in self.providers.names() and requested_provider != "fake":
             return self.providers.get(requested_provider)
         return self._first_available(self.matrix.generation)
+
+    def get_generation_candidates(self, requested_provider: str | None = None) -> list[LLMProvider]:
+        requested: list[LLMProvider] = []
+        if requested_provider and requested_provider in self.providers.names() and requested_provider != "fake":
+            requested.append(self.providers.get(requested_provider))
+        ordered = requested + [
+            provider
+            for provider in self._available(self.matrix.generation)
+            if provider.name != requested_provider
+        ]
+        return ordered
 
     def get_judge_providers(self) -> list[LLMProvider]:
         return self._available(self.matrix.judges)
@@ -60,7 +98,7 @@ class ProviderRouter:
             reverse=True,
         )
         for _, _, provider_name, result in scored:
-            if provider_name in self.providers.names():
+            if provider_name in self.providers.names() and provider_name in self.matrix.repair:
                 return RepairSelection(
                     provider_name=provider_name,
                     reason=f"Selected strongest verifier from panel: {provider_name} with verdict {result.verdict.value}.",
@@ -74,10 +112,12 @@ class ProviderRouter:
 
     def readiness(self) -> dict[str, object]:
         return {
+            "routing_policy_version": self.routing_policy_version,
             "clarification": self._readiness_for(self.matrix.clarification),
             "generation": self._readiness_for(self.matrix.generation),
             "judges": self._readiness_for(self.matrix.judges),
             "cove": self._readiness_for(self.matrix.cove),
+            "repair": self._readiness_for(self.matrix.repair),
         }
 
     def _first_available(self, names: tuple[str, ...]) -> LLMProvider:

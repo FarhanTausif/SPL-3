@@ -21,7 +21,7 @@ def _settings(**overrides: object) -> Settings:
 
 
 def test_provider_router_uses_static_role_matrix() -> None:
-    router = ProviderRouter(build_provider_registry(_settings()))
+    router = ProviderRouter.from_settings(build_provider_registry(_settings()), _settings())
 
     assert router.get_clarification_provider().name == "gemini"
     assert router.get_generation_provider().name == "grok"
@@ -31,7 +31,7 @@ def test_provider_router_uses_static_role_matrix() -> None:
 
 def test_provider_router_selects_best_verifier_for_repair() -> None:
     registry = build_provider_registry(_settings())
-    router = ProviderRouter(registry)
+    router = ProviderRouter.from_settings(registry, _settings())
     generation = router.get_generation_provider()
     judge_results = [
         JudgeResult(verdict=JudgeVerdict.uncertain, provider="gemini", model="g", duration_ms=1.0, hallucination_score=0.55),
@@ -46,9 +46,22 @@ def test_provider_router_selects_best_verifier_for_repair() -> None:
 
 
 def test_provider_router_reports_role_readiness() -> None:
-    readiness = ProviderRouter(build_provider_registry(_settings(mistral_api_key=None))).readiness()
+    settings = _settings(mistral_api_key=None)
+    readiness = ProviderRouter.from_settings(build_provider_registry(settings), settings).readiness()
 
     assert readiness["clarification"]["ready"] is True
     assert readiness["generation"]["ready"] is True
     assert readiness["judges"]["ready"] is True
     assert readiness["cove"]["available"] == ["gemini"]
+    assert readiness["routing_policy_version"] == "v1"
+
+
+def test_provider_router_uses_settings_defined_order() -> None:
+    settings = _settings(
+        clarification_provider_order=("mistral", "gemini"),
+        generation_provider_order=("gemini", "grok"),
+    )
+    router = ProviderRouter.from_settings(build_provider_registry(settings), settings)
+
+    assert router.get_clarification_provider().name == "mistral"
+    assert router.get_generation_provider().name == "gemini"

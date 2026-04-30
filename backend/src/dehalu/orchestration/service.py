@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from dehalu.adapters.language import build_language_registry
 from dehalu.adapters.llm import ProviderRegistry
 from dehalu.adapters.llm.base import LLMProvider
+from dehalu.adapters.llm.runtime import ProviderExecutionError
 from dehalu.adapters.tools import ToolGateway
 from dehalu.core.settings import Settings
 from dehalu.orchestration.execution import build_execution_engine
@@ -76,11 +77,13 @@ class RunOrchestrator:
             self.sandbox_verifier,
             self.policy_engine,
         )
-        self.router = ProviderRouter(providers)
+        self.router = ProviderRouter.from_settings(providers, settings)
 
     def run(self, request: RunRequest, session: Session) -> RunResponse:
         normalized = normalize_request(request, self.settings)
         repository = RunRepository(session)
+        if normalized.provider not in self.providers.names():
+            self.providers.get(normalized.provider)
         if normalized.run_mode == RunMode.basic:
             provider = self.providers.get(normalized.provider)
             execution_result = self.execution_engine.execute(normalized, provider)
@@ -108,32 +111,72 @@ class RunOrchestrator:
     def process_claimed_run(self, run_record: RunRecord, session: Session) -> RunResponse | RunDetail:
         repository = RunRepository(session)
         normalized = NormalizedRequest.model_validate(run_record.normalized_request)
-        stage_summary = [self._stage("clarification", "running")]
+        stage_summary: list[StageStatus] = []
+        provider_invocations: list[dict] = []
 
-        clarification_provider = self.router.get_clarification_provider()
-        clarification = clarification_provider.clarify(normalized)
-        stage_summary[0] = self._stage(
-            "clarification",
-            "completed" if not clarification.needs_user_input else "needs_clarification",
-            {
-                "provider": clarification_provider.name,
-                "ambiguity_flags": clarification.ambiguity_flags,
-            },
+        clarification_provider, clarification, clarification_fallback_used = self._run_clarification_chain(normalized)
+        provider_invocations.extend(self._collect_provider_invocations_from_clarification(clarification))
+        clarification_status = "completed" if not clarification.needs_user_input else "needs_clarification"
+        stage_summary.append(
+            self._stage(
+                "clarification",
+                clarification_status,
+                {
+                    "provider": clarification_provider.name,
+                    "ambiguity_flags": clarification.ambiguity_flags,
+                    "fallback_used": clarification_fallback_used,
+                },
+            )
+        )
+        repository.update_stage_status(
+            run_record.id,
+            stage="clarification",
+            status=clarification_status,
+            details=stage_summary[0].details,
+            worker_id=self.settings.worker_id,
+            lease_seconds=self.settings.worker_lease_seconds,
+        )
+        repository.append_event(
+            run_record.id,
+            event_type="stage_completed",
+            stage="clarification",
+            status=clarification_status,
+            message=f"Clarification completed with provider {clarification_provider.name}.",
+            payload=stage_summary[0].details,
         )
         repository.set_clarification_result(run_record.id, clarification, stage_summary=stage_summary)
         if clarification.needs_user_input:
             return repository.get_run_detail(run_record.id)
 
-        generation_provider = self.router.get_generation_provider(normalized.provider)
+        generation_provider, execution_result, generation_fallback_used = self._run_generation_chain(normalized)
         worker_request = normalized.model_copy(update={"provider": generation_provider.name})
-        repository.heartbeat_run(
+        provider_invocations.extend(self._collect_provider_invocations_from_bundle(execution_result.initial_attempt))
+        provider_invocations.extend(self._collect_provider_invocations_from_bundle(execution_result.final_attempt))
+        if execution_result.repair_result.outcome != RepairOutcome.skipped:
+            provider_invocations.extend(self._collect_provider_invocations_from_repair(execution_result.repair_result))
+        stage_summary.append(
+            self._stage(
+                "generation",
+                "completed",
+                {"provider": generation_provider.name, "fallback_used": generation_fallback_used},
+            )
+        )
+        repository.update_stage_status(
             run_record.id,
+            stage="generation",
+            status="completed",
+            details=stage_summary[-1].details,
             worker_id=self.settings.worker_id,
             lease_seconds=self.settings.worker_lease_seconds,
         )
-        stage_summary.append(self._stage("generation", "running", {"provider": generation_provider.name}))
-        execution_result = self.execution_engine.execute(worker_request, generation_provider)
-        stage_summary[-1] = self._stage("generation", "completed", {"provider": generation_provider.name})
+        repository.append_event(
+            run_record.id,
+            event_type="stage_completed",
+            stage="generation",
+            status="completed",
+            message=f"Generation and internal verification completed with provider {generation_provider.name}.",
+            payload=stage_summary[-1].details,
+        )
 
         final_attempt = execution_result.final_attempt
         claim_values = [claim.value for claim in final_attempt.extracted_claims]
@@ -144,12 +187,15 @@ class RunOrchestrator:
             code=final_attempt.coder_output.code,
             policy=normalized.tool_policy,
         )
-
-        repository.heartbeat_run(
+        repository.update_stage_status(
             run_record.id,
+            stage="tooling",
+            status="completed",
+            details={"tool_count": len(tool_records)},
             worker_id=self.settings.worker_id,
             lease_seconds=self.settings.worker_lease_seconds,
         )
+
         judge_providers = self.router.get_judge_providers() or [generation_provider]
         judge_results = [
             provider.judge(
@@ -161,6 +207,9 @@ class RunOrchestrator:
             )
             for provider in judge_providers
         ]
+        for result in judge_results:
+            provider_invocations.extend(self._collect_provider_invocations_from_judge(result))
+
         cove_providers = self.router.get_cove_providers() or [generation_provider]
         cove_results = [
             provider.cove(
@@ -173,11 +222,10 @@ class RunOrchestrator:
             )
             for index, provider in enumerate(cove_providers)
         ]
-        panel = self._build_panel(
-            [provider.name for provider in judge_providers],
-            judge_results,
-            cove_results,
-        )
+        for result in cove_results:
+            provider_invocations.extend(self._collect_provider_invocations_from_cove(result))
+
+        panel = self._build_panel([provider.name for provider in judge_providers], judge_results, cove_results)
         repair_selection = self.router.choose_repair_provider(
             judge_results=judge_results,
             generation_provider=generation_provider,
@@ -187,7 +235,15 @@ class RunOrchestrator:
         stage_summary.extend(
             [
                 self._stage("tooling", "completed", {"tool_count": len(tool_records)}),
-                self._stage("panel_verification", "completed", {"providers": panel.providers}),
+                self._stage(
+                    "panel_verification",
+                    "completed",
+                    {
+                        "providers": panel.providers,
+                        "consensus_verdict": panel.consensus_verdict,
+                        "disagreement_score": panel.disagreement_score,
+                    },
+                ),
                 self._stage(
                     "policy",
                     "completed",
@@ -197,6 +253,22 @@ class RunOrchestrator:
                     },
                 ),
             ]
+        )
+        repository.update_stage_status(
+            run_record.id,
+            stage="panel_verification",
+            status="completed",
+            details=stage_summary[-2].details,
+            worker_id=self.settings.worker_id,
+            lease_seconds=self.settings.worker_lease_seconds,
+        )
+        repository.update_stage_status(
+            run_record.id,
+            stage="policy",
+            status="completed",
+            details=stage_summary[-1].details,
+            worker_id=self.settings.worker_id,
+            lease_seconds=self.settings.worker_lease_seconds,
         )
 
         return repository.complete_run(
@@ -225,15 +297,26 @@ class RunOrchestrator:
                 (EvidenceKind.panel, panel.model_dump(mode="json")),
                 (EvidenceKind.fusion, fused_metrics.model_dump(mode="json")),
                 (
+                    EvidenceKind.provider_invocation,
+                    {
+                        "invocations": provider_invocations,
+                        "count": len(provider_invocations),
+                    },
+                ),
+                (
                     EvidenceKind.routing,
                     {
                         "clarification_provider": clarification_provider.name,
+                        "clarification_fallback_used": clarification_fallback_used,
                         "generation_provider": generation_provider.name,
+                        "generation_fallback_used": generation_fallback_used,
                         "judge_panel": panel.providers,
                         "cove_providers": [provider.name for provider in cove_providers],
                         "repair_provider": repair_selection.provider_name,
                         "repair_reason": repair_selection.reason,
                         "repair_fallback_used": repair_selection.fallback_used,
+                        "routing_policy_version": self.settings.routing_policy_version,
+                        "prompt_policy_version": self.settings.prompt_policy_version,
                     },
                 ),
                 (EvidenceKind.clarification, clarification.model_dump(mode="json")),
@@ -261,7 +344,12 @@ class RunOrchestrator:
             cove_results=cove_results,
             disagreement_score=disagreement,
             consensus_verdict=consensus,
-            metadata={"judge_count": len(judge_results), "cove_count": len(cove_results)},
+            metadata={
+                "judge_count": len(judge_results),
+                "cove_count": len(cove_results),
+                "judge_verdicts": [result.verdict.value for result in judge_results],
+                "cove_verdicts": [result.verdict.value for result in cove_results],
+            },
         )
 
     def _fuse_metrics(self, final_attempt, tool_records, panel: PanelVerdict) -> FusedHallucinationMetrics:
@@ -304,9 +392,86 @@ class RunOrchestrator:
             judge_disagreement_score=panel.disagreement_score,
             tool_supported_claim_ratio=tool_supported,
             overall_hallucination_score=overall,
-            metadata={"policy_state": final_attempt.policy_decision.state.value},
+            metadata={
+                "policy_state": final_attempt.policy_decision.state.value,
+                "decision_driver": (
+                    "deterministic"
+                    if final_attempt.sandbox_result.status.value != "passed" or final_attempt.static_findings
+                    else "panel"
+                ),
+            },
         )
 
     def _stage(self, name: str, status: str, details: dict | None = None) -> StageStatus:
         now = datetime.now(timezone.utc)
         return StageStatus(stage=name, status=status, started_at=now, finished_at=now, details=details or {})
+
+    def _run_clarification_chain(self, normalized: NormalizedRequest) -> tuple[LLMProvider, ClarificationResult, bool]:
+        candidates = self.router.get_clarification_candidates()
+        if not candidates:
+            requested = normalized.provider if normalized.provider in self.providers.names() else self.settings.default_provider
+            candidates = [self.providers.get(requested)]
+        fallback_used = False
+        for index, provider in enumerate(candidates):
+            clarification = provider.clarify(normalized)
+            invocation = clarification.metadata.get("provider_invocation", {})
+            if invocation.get("success", True) or index == len(candidates) - 1:
+                return provider, clarification, fallback_used
+            fallback_used = True
+        provider = candidates[-1]
+        return provider, provider.clarify(normalized), True
+
+    def _run_generation_chain(self, normalized: NormalizedRequest):
+        candidates = self.router.get_generation_candidates(normalized.provider)
+        if not candidates:
+            candidates = [self.providers.get(normalized.provider)]
+        fallback_used = False
+        last_error: Exception | None = None
+        for index, provider in enumerate(candidates):
+            try:
+                worker_request = normalized.model_copy(update={"provider": provider.name})
+                return provider, self.execution_engine.execute(worker_request, provider), fallback_used
+            except ProviderExecutionError as exc:
+                last_error = exc
+                if index < len(candidates) - 1:
+                    fallback_used = True
+                    continue
+                raise
+            except Exception as exc:
+                last_error = exc
+                if index < len(candidates) - 1:
+                    fallback_used = True
+                    continue
+                raise
+        raise last_error or RuntimeError("No generation provider could execute the run.")
+
+    def _collect_provider_invocations_from_clarification(self, clarification: ClarificationResult) -> list[dict]:
+        invocation = clarification.metadata.get("provider_invocation")
+        return [invocation] if invocation else []
+
+    def _collect_provider_invocations_from_bundle(self, attempt) -> list[dict]:
+        invocations: list[dict] = []
+        for source in (
+            attempt.coder_output.metadata.get("provider_invocation"),
+            attempt.judge_result.metrics.get("provider_invocation"),
+            attempt.cove_result.metrics.get("provider_invocation"),
+        ):
+            if source:
+                invocations.append(source)
+        return invocations
+
+    def _collect_provider_invocations_from_repair(self, repair_result) -> list[dict]:
+        invocations: list[dict] = []
+        for attempt in repair_result.attempts:
+            invocation = attempt.metadata.get("provider_invocation")
+            if invocation:
+                invocations.append(invocation)
+        return invocations
+
+    def _collect_provider_invocations_from_judge(self, judge_result) -> list[dict]:
+        invocation = judge_result.metrics.get("provider_invocation")
+        return [invocation] if invocation else []
+
+    def _collect_provider_invocations_from_cove(self, cove_result) -> list[dict]:
+        invocation = cove_result.metrics.get("provider_invocation")
+        return [invocation] if invocation else []

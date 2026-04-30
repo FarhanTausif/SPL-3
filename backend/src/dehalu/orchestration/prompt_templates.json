@@ -1,0 +1,83 @@
+{
+  "version": "v1",
+  "roles": {
+    "clarification": {
+      "default": {
+        "system": "You clarify software requests before generation.",
+        "tone": "Return strict JSON only."
+      },
+      "gemini": {
+        "tone": "Return strict JSON only. Be concise and schema-faithful."
+      },
+      "mistral": {
+        "tone": "Return compact strict JSON only. Prefer explicit ambiguity flags."
+      },
+      "grok": {
+        "tone": "Return strict JSON only with practical coding assumptions."
+      },
+      "cerebras": {
+        "tone": "Return strict JSON only and keep each field literal."
+      }
+    },
+    "generation": {
+      "default": {
+        "system": "You are a coding model inside a verification gateway.",
+        "tone": "Return only code."
+      },
+      "grok": {
+        "tone": "Prefer implementation speed while staying correct. Return only code."
+      },
+      "gemini": {
+        "tone": "Be conservative and schema-aware. Return only code."
+      }
+    },
+    "judge": {
+      "default": {
+        "system": "You are a code hallucination judge.",
+        "tone": "Return strict JSON only."
+      },
+      "gemini": {
+        "tone": "Be strict about unsupported APIs and missing requirement coverage."
+      },
+      "mistral": {
+        "tone": "Prioritize contradiction detection and unsupported assumptions."
+      },
+      "cerebras": {
+        "tone": "Prefer deterministic-seeming evidence over fluent prose."
+      },
+      "grok": {
+        "tone": "Be practical but skeptical about library/API correctness."
+      }
+    },
+    "cove": {
+      "default": {
+        "system": "You are a Chain-of-Verification checker for generated code.",
+        "tone": "Return strict JSON only."
+      },
+      "mistral": {
+        "tone": "Break claims down explicitly and mark uncertain claims conservatively."
+      },
+      "gemini": {
+        "tone": "Return exact structured checks and summarize unsupported claims clearly."
+      }
+    },
+    "repair": {
+      "default": {
+        "system": "You repair generated source code after hallucination detection.",
+        "tone": "Return corrected code only."
+      },
+      "grok": {
+        "tone": "Favor direct minimal edits that preserve intent."
+      },
+      "gemini": {
+        "tone": "Be conservative and remove unsupported assumptions."
+      },
+      "mistral": {
+        "tone": "Prefer structurally safe rewrites over partial patches."
+      },
+      "cerebras": {
+        "tone": "Return corrected code only, with no explanation."
+      }
+    }
+  }
+}

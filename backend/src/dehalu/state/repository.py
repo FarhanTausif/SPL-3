@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from dehalu.schemas import (
@@ -183,6 +183,49 @@ class RunRepository:
             raise ValueError(f"Run {run_id} is not claimed by worker {worker_id}.")
         run_record.last_heartbeat_at = now
         run_record.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        self.session.commit()
+
+    def update_stage_status(
+        self,
+        run_id: str,
+        *,
+        stage: str,
+        status: str,
+        details: dict | None = None,
+        worker_id: str | None = None,
+        lease_seconds: int | None = None,
+    ) -> None:
+        run_record = self._get_run(run_id)
+        now = datetime.now(timezone.utc)
+        current = [StageStatus.model_validate(item) for item in (run_record.stage_summary or [])]
+        replaced = False
+        for index, entry in enumerate(current):
+            if entry.stage == stage:
+                current[index] = StageStatus(
+                    stage=stage,
+                    status=status,
+                    started_at=entry.started_at or now,
+                    finished_at=now if status not in {"queued", "running"} else None,
+                    details={**entry.details, **(details or {})},
+                )
+                replaced = True
+                break
+        if not replaced:
+            current.append(
+                StageStatus(
+                    stage=stage,
+                    status=status,
+                    started_at=now,
+                    finished_at=now if status not in {"queued", "running"} else None,
+                    details=details or {},
+                )
+            )
+        run_record.stage_summary = [stage_status.model_dump(mode="json") for stage_status in current]
+        if worker_id is not None and lease_seconds is not None:
+            if run_record.claimed_by != worker_id:
+                raise ValueError(f"Run {run_id} is not claimed by worker {worker_id}.")
+            run_record.last_heartbeat_at = now
+            run_record.lease_expires_at = now + timedelta(seconds=lease_seconds)
         self.session.commit()
 
     def release_run_claim(self, run_id: str) -> None:
@@ -550,6 +593,42 @@ class RunRepository:
             )
             for event in run_record.events
         ]
+
+    def queue_backlog_summary(self) -> dict[str, int]:
+        queued = self.session.scalar(
+            select(func.count()).select_from(RunRecord).where(
+                RunRecord.run_mode == RunMode.advanced.value,
+                RunRecord.status == RunLifecycleStatus.queued.value,
+            )
+        ) or 0
+        running = self.session.scalar(
+            select(func.count()).select_from(RunRecord).where(
+                RunRecord.run_mode == RunMode.advanced.value,
+                RunRecord.status == RunLifecycleStatus.running.value,
+            )
+        ) or 0
+        return {"queued": int(queued), "running": int(running)}
+
+    def worker_freshness(self, worker_id: str, *, stale_after_seconds: int) -> dict[str, object]:
+        statement = (
+            select(RunRecord.last_heartbeat_at)
+            .where(RunRecord.claimed_by == worker_id, RunRecord.last_heartbeat_at.is_not(None))
+            .order_by(RunRecord.last_heartbeat_at.desc())
+            .limit(1)
+        )
+        last_heartbeat = self.session.execute(statement).scalar_one_or_none()
+        if last_heartbeat is None:
+            return {"worker_id": worker_id, "last_heartbeat_at": None, "fresh": False}
+        age_seconds = max(
+            0.0,
+            (datetime.now(timezone.utc) - last_heartbeat).total_seconds(),
+        )
+        return {
+            "worker_id": worker_id,
+            "last_heartbeat_at": last_heartbeat.isoformat(),
+            "fresh": age_seconds <= stale_after_seconds,
+            "age_seconds": round(age_seconds, 3),
+        }
 
     def _get_run(self, run_id: str) -> RunRecord:
         statement = (

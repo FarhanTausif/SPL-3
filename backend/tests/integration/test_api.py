@@ -65,6 +65,9 @@ async def test_health_endpoint(client: AsyncClient) -> None:
     assert response.json()["orchestration"]["configured_mode"] == "direct"
     assert response.json()["orchestration"]["crewai_enabled"] is False
     assert response.json()["orchestration"]["advanced_run_mode"] == "worker_backed"
+    assert response.json()["orchestration"]["queue_backlog"]["queued"] == 0
+    assert response.json()["orchestration"]["provider_role_readiness"]["routing_policy_version"] == "v1"
+    assert response.json()["orchestration"]["provider_health_details"]["fake"]["live_smoke_check"] == "skipped"
 
 
 async def test_create_and_fetch_run(client: AsyncClient) -> None:
@@ -496,7 +499,9 @@ async def test_create_advanced_run_returns_completed_status_and_events(client: A
     assert events[0]["event_type"] == "run_created"
     assert any(event["event_type"] == "run_claimed" for event in events)
     assert evidence_response.status_code == 200
-    assert {"tool", "panel", "fusion", "routing", "clarification"}.issubset({item["kind"] for item in evidence})
+    assert {"tool", "panel", "fusion", "routing", "clarification", "provider_invocation"}.issubset(
+        {item["kind"] for item in evidence}
+    )
 
 
 async def test_create_advanced_run_can_stop_for_clarification(client: AsyncClient, db_session: Session) -> None:

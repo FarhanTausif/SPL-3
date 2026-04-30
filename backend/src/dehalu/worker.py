@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable
 
 from dehalu.adapters.llm import build_provider_registry
+from dehalu.adapters.llm.runtime import ProviderExecutionError
 from dehalu.core.settings import get_settings
 from dehalu.orchestration import RunOrchestrator
 from dehalu.state.database import SessionLocal
@@ -34,6 +35,21 @@ class RunWorker:
                 return False
             try:
                 self.orchestrator.process_claimed_run(claimed, session)
+            except ProviderExecutionError as exc:  # pragma: no cover - exercised through integration behavior
+                repository.fail_run(
+                    claimed.id,
+                    str(exc),
+                    stage_summary=[
+                        self.orchestrator._stage(  # noqa: SLF001 - internal helper keeps stage shape consistent
+                            "provider_failure",
+                            "failed",
+                            {
+                                "provider_invocation": exc.record.model_dump(mode="json"),
+                                "failure_kind": exc.record.failure_kind.value,
+                            },
+                        )
+                    ],
+                )
             except Exception as exc:  # pragma: no cover - exercised through integration behavior
                 repository.fail_run(claimed.id, str(exc))
             return True

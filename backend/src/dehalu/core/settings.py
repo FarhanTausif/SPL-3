@@ -24,26 +24,40 @@ class Settings(BaseSettings):
     default_language: str = "python"
     default_latency_budget_seconds: int = 15
     orchestration_mode: str = "direct"
+    routing_policy_version: str = "v1"
+    prompt_policy_version: str = "v1"
+    provider_capture_full_payloads: bool = False
+    provider_live_smoke_checks_enabled: bool = False
+    provider_health_timeout_seconds: float = Field(default=2.0, gt=0.0, le=30.0)
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_generate_model: str = "gemini-2.0-flash"
     gemini_verify_model: str = "gemini-2.0-flash"
     gemini_timeout_seconds: float = Field(default=15.0, gt=0.0)
+    gemini_retry_attempts: int = Field(default=1, ge=0, le=5)
     grok_api_key: str | None = None
     grok_base_url: str = "https://api.x.ai/v1"
     grok_generate_model: str = "grok-code-fast-1"
     grok_verify_model: str = "grok-beta"
     grok_timeout_seconds: float = Field(default=15.0, gt=0.0)
+    grok_retry_attempts: int = Field(default=1, ge=0, le=5)
     mistral_api_key: str | None = None
     mistral_base_url: str = "https://api.mistral.ai/v1"
     mistral_generate_model: str = "codestral-latest"
     mistral_verify_model: str = "mistral-large-latest"
     mistral_timeout_seconds: float = Field(default=15.0, gt=0.0)
+    mistral_retry_attempts: int = Field(default=1, ge=0, le=5)
     cerebras_api_key: str | None = None
     cerebras_base_url: str = "https://api.cerebras.ai/v1"
     cerebras_generate_model: str = "llama3.1-70b"
     cerebras_verify_model: str = "llama3.1-70b"
     cerebras_timeout_seconds: float = Field(default=15.0, gt=0.0)
+    cerebras_retry_attempts: int = Field(default=1, ge=0, le=5)
+    clarification_provider_order: tuple[str, ...] = ("gemini", "mistral")
+    generation_provider_order: tuple[str, ...] = ("grok", "gemini")
+    judge_provider_order: tuple[str, ...] = ("gemini", "mistral", "cerebras")
+    cove_provider_order: tuple[str, ...] = ("mistral", "gemini")
+    repair_provider_order: tuple[str, ...] = ("gemini", "mistral", "cerebras", "grok")
     worker_poll_interval_seconds: float = Field(default=1.0, gt=0.0, le=30.0)
     worker_lease_seconds: int = Field(default=30, ge=5, le=300)
     worker_max_retries: int = Field(default=3, ge=1, le=20)
@@ -70,6 +84,8 @@ class Settings(BaseSettings):
         "cerebras_base_url",
         "cerebras_generate_model",
         "cerebras_verify_model",
+        "routing_policy_version",
+        "prompt_policy_version",
     )
     @classmethod
     def normalize_tokens(cls, value: str | None) -> str | None:
@@ -84,6 +100,22 @@ class Settings(BaseSettings):
         if value not in {"direct", "crewai"}:
             raise ValueError("orchestration_mode must be 'direct' or 'crewai'")
         return value
+
+    @field_validator(
+        "clarification_provider_order",
+        "generation_provider_order",
+        "judge_provider_order",
+        "cove_provider_order",
+        "repair_provider_order",
+        mode="before",
+    )
+    @classmethod
+    def normalize_provider_orders(cls, value: object) -> tuple[str, ...]:
+        if isinstance(value, str):
+            return tuple(token.strip().lower() for token in value.split(",") if token.strip())
+        if isinstance(value, (list, tuple)):
+            return tuple(str(token).strip().lower() for token in value if str(token).strip())
+        raise TypeError("provider order settings must be a comma-separated string or sequence")
 
     @property
     def gemini_enabled(self) -> bool:

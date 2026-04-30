@@ -92,6 +92,7 @@ class EvidenceKind(StrEnum):
     panel = "panel"
     fusion = "fusion"
     routing = "routing"
+    provider_invocation = "provider_invocation"
 
 
 class AgentRole(StrEnum):
@@ -100,6 +101,18 @@ class AgentRole(StrEnum):
     judge = "judge"
     cove = "cove"
     repair = "repair"
+
+
+class ProviderFailureKind(StrEnum):
+    none = "none"
+    transient_http = "transient_http"
+    rate_limited = "rate_limited"
+    auth = "auth"
+    misconfiguration = "misconfiguration"
+    malformed_output = "malformed_output"
+    empty_output = "empty_output"
+    transport = "transport"
+    unknown = "unknown"
 
 
 class ToolPolicy(BaseModel):
@@ -161,6 +174,7 @@ class CoderOutput(BaseModel):
     dependencies: list[str] = Field(default_factory=list)
     files_touched: list[str] = Field(default_factory=list)
     execution_notes: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExtractedClaim(BaseModel):
@@ -292,6 +306,24 @@ class ToolInvocationRecord(BaseModel):
     summary: str
     duration_ms: float = Field(ge=0.0)
     changed_verdict: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderInvocationRecord(BaseModel):
+    provider_name: str
+    model: str
+    stage: str
+    role: AgentRole
+    success: bool
+    latency_ms: float = Field(ge=0.0)
+    retry_count: int = Field(default=0, ge=0)
+    fallback_used: bool = False
+    failure_kind: ProviderFailureKind = ProviderFailureKind.none
+    prompt_template_version: str = "v1"
+    routing_policy_version: str = "v1"
+    usage: dict[str, Any] = Field(default_factory=dict)
+    request_summary: dict[str, Any] = Field(default_factory=dict)
+    response_summary: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

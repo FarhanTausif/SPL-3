@@ -167,7 +167,35 @@ def test_openai_compat_provider_clarify_generate_judge_cove_and_repair() -> None
     )
 
     assert clarification.language == "python"
+    assert clarification.metadata["provider_invocation"]["success"] is True
     assert output.code == "print('ok')"
+    assert output.metadata["provider_invocation"]["prompt_template_version"] == "v1"
     assert judge_result.verdict == JudgeVerdict.pass_
+    assert judge_result.metrics["provider_invocation"]["success"] is True
     assert cove_result.verdict.value == "pass"
     assert repaired.code == "print('fixed')"
+
+
+def test_openai_compat_provider_retries_rate_limit_once() -> None:
+    responses = iter(
+        [
+            httpx.Response(429, json={"error": {"message": "rate limited"}}),
+            httpx.Response(200, json=_chat_response("print('ok')")),
+        ]
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: next(responses)))
+    provider = OpenAICompatibleLLMProvider(
+        name="grok",
+        api_key="grok-key",
+        base_url="https://api.x.ai/v1",
+        generate_model="grok-code-fast-1",
+        verify_model="grok-beta",
+        timeout_seconds=15.0,
+        http_client=client,
+        retry_attempts=1,
+    )
+
+    output = provider.generate(_request())
+
+    assert output.code == "print('ok')"
+    assert output.metadata["provider_invocation"]["retry_count"] == 1
