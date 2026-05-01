@@ -594,7 +594,7 @@ class RunRepository:
             for event in run_record.events
         ]
 
-    def queue_backlog_summary(self) -> dict[str, int]:
+    def queue_backlog_summary(self) -> dict[str, int | bool]:
         queued = self.session.scalar(
             select(func.count()).select_from(RunRecord).where(
                 RunRecord.run_mode == RunMode.advanced.value,
@@ -607,7 +607,14 @@ class RunRepository:
                 RunRecord.status == RunLifecycleStatus.running.value,
             )
         ) or 0
-        return {"queued": int(queued), "running": int(running)}
+        queued_count = int(queued)
+        running_count = int(running)
+        return {
+            "queued": queued_count,
+            "running": running_count,
+            "total": queued_count + running_count,
+            "has_backlog": (queued_count + running_count) > 0,
+        }
 
     def worker_freshness(self, worker_id: str, *, stale_after_seconds: int) -> dict[str, object]:
         statement = (
@@ -618,7 +625,13 @@ class RunRepository:
         )
         last_heartbeat = self.session.execute(statement).scalar_one_or_none()
         if last_heartbeat is None:
-            return {"worker_id": worker_id, "last_heartbeat_at": None, "fresh": False}
+            return {
+                "worker_id": worker_id,
+                "last_heartbeat_at": None,
+                "fresh": False,
+                "age_seconds": None,
+                "stale_after_seconds": stale_after_seconds,
+            }
         age_seconds = max(
             0.0,
             (datetime.now(timezone.utc) - last_heartbeat).total_seconds(),
@@ -628,6 +641,7 @@ class RunRepository:
             "last_heartbeat_at": last_heartbeat.isoformat(),
             "fresh": age_seconds <= stale_after_seconds,
             "age_seconds": round(age_seconds, 3),
+            "stale_after_seconds": stale_after_seconds,
         }
 
     def _get_run(self, run_id: str) -> RunRecord:

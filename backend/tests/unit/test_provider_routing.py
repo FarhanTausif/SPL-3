@@ -43,6 +43,7 @@ def test_provider_router_selects_best_verifier_for_repair() -> None:
 
     assert selection.provider_name == "mistral"
     assert selection.fallback_used is False
+    assert selection.selected_via == "judge_panel"
 
 
 def test_provider_router_reports_role_readiness() -> None:
@@ -53,6 +54,10 @@ def test_provider_router_reports_role_readiness() -> None:
     assert readiness["generation"]["ready"] is True
     assert readiness["judges"]["ready"] is True
     assert readiness["cove"]["available"] == ["gemini"]
+    assert readiness["cove"]["unavailable"] == ["mistral"]
+    assert readiness["cove"]["selected"] == "gemini"
+    assert readiness["roles"]["generation"]["selected"] == "grok"
+    assert readiness["live_provider_operation_ready"] is True
     assert readiness["routing_policy_version"] == "v1"
 
 
@@ -65,3 +70,50 @@ def test_provider_router_uses_settings_defined_order() -> None:
 
     assert router.get_clarification_provider().name == "mistral"
     assert router.get_generation_provider().name == "gemini"
+
+
+def test_provider_router_deprioritizes_failed_judge_invocations_for_repair() -> None:
+    settings = _settings()
+    registry = build_provider_registry(settings)
+    router = ProviderRouter.from_settings(registry, settings)
+    generation = router.get_generation_provider()
+    judge_results = [
+        JudgeResult(
+            verdict=JudgeVerdict.fail,
+            provider="gemini",
+            model="g",
+            duration_ms=1.0,
+            hallucination_score=0.95,
+            metrics={"provider_invocation": {"success": False, "failure_kind": "transport"}},
+        ),
+        JudgeResult(
+            verdict=JudgeVerdict.uncertain,
+            provider="mistral",
+            model="m",
+            duration_ms=1.0,
+            hallucination_score=0.55,
+            metrics={"provider_invocation": {"success": True}},
+        ),
+    ]
+
+    selection = router.choose_repair_provider(judge_results=judge_results, generation_provider=generation)
+
+    assert selection.provider_name == "mistral"
+    assert selection.selected_via == "judge_panel"
+    assert selection.fallback_used is False
+
+
+def test_provider_router_falls_back_to_repair_chain_when_panel_missing() -> None:
+    settings = _settings(gemini_api_key=None, mistral_api_key=None, cerebras_api_key=None, grok_api_key="grok-key")
+    registry = build_provider_registry(settings)
+    router = ProviderRouter.from_settings(registry, settings)
+    generation = router.get_generation_provider()
+    judge_results = [
+        JudgeResult(verdict=JudgeVerdict.fail, provider="unknown-panel", model="u", duration_ms=1.0, hallucination_score=0.9)
+    ]
+
+    selection = router.choose_repair_provider(judge_results=judge_results, generation_provider=generation)
+
+    assert selection.provider_name == "grok"
+    assert selection.fallback_used is True
+    assert selection.selected_via == "repair_chain"

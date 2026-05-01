@@ -22,6 +22,8 @@ class RepairSelection:
     provider_name: str
     reason: str
     fallback_used: bool = False
+    selected_via: str = "judge_panel"
+    candidate_chain: tuple[str, ...] = ()
 
 
 class ProviderRouter:
@@ -88,6 +90,7 @@ class ProviderRouter:
         scored = sorted(
             (
                 (
+                    int(self._judge_invocation_success(result)),
                     self._repair_rank(result),
                     self._judge_precedence(result.provider),
                     result.provider,
@@ -97,27 +100,49 @@ class ProviderRouter:
             ),
             reverse=True,
         )
-        for _, _, provider_name, result in scored:
+        for _, _, _, provider_name, result in scored:
             if provider_name in self.providers.names() and provider_name in self.matrix.repair:
                 return RepairSelection(
                     provider_name=provider_name,
                     reason=f"Selected strongest verifier from panel: {provider_name} with verdict {result.verdict.value}.",
                     fallback_used=False,
+                    selected_via="judge_panel",
+                    candidate_chain=self.matrix.repair,
                 )
+        repair_candidates = self._available(self.matrix.repair)
+        if repair_candidates:
+            selected = repair_candidates[0]
+            return RepairSelection(
+                provider_name=selected.name,
+                reason=(
+                    f"Fell back to first available repair provider {selected.name} "
+                    "because no panel verifier mapped to a repair route."
+                ),
+                fallback_used=True,
+                selected_via="repair_chain",
+                candidate_chain=self.matrix.repair,
+            )
         return RepairSelection(
             provider_name=generation_provider.name,
             reason=f"Fell back to generation provider {generation_provider.name} because no selected verifier was available.",
             fallback_used=True,
+            selected_via="generation_fallback",
+            candidate_chain=self.matrix.repair,
         )
 
     def readiness(self) -> dict[str, object]:
-        return {
-            "routing_policy_version": self.routing_policy_version,
+        roles = {
             "clarification": self._readiness_for(self.matrix.clarification),
             "generation": self._readiness_for(self.matrix.generation),
             "judges": self._readiness_for(self.matrix.judges),
             "cove": self._readiness_for(self.matrix.cove),
             "repair": self._readiness_for(self.matrix.repair),
+        }
+        return {
+            "routing_policy_version": self.routing_policy_version,
+            **roles,
+            "roles": roles,
+            "live_provider_operation_ready": all(role["ready"] for role in roles.values()),
         }
 
     def _first_available(self, names: tuple[str, ...]) -> LLMProvider:
@@ -139,7 +164,13 @@ class ProviderRouter:
     def _readiness_for(self, names: tuple[str, ...]) -> dict[str, object]:
         health = self.providers.health()
         available = [name for name in names if name in self.providers.names() and health.get(name)]
-        return {"configured": list(names), "available": available, "ready": bool(available)}
+        return {
+            "configured": list(names),
+            "available": available,
+            "unavailable": [name for name in names if name not in available],
+            "selected": available[0] if available else None,
+            "ready": bool(available),
+        }
 
     def _repair_rank(self, result: JudgeResult) -> tuple[int, float]:
         severity = {"fail": 2, "uncertain": 1, "pass": 0}[result.verdict.value]
@@ -148,3 +179,9 @@ class ProviderRouter:
     def _judge_precedence(self, provider_name: str) -> int:
         precedence = {"gemini": 1, "mistral": 2, "cerebras": 3, "grok": 0, "fake": -1}
         return precedence.get(provider_name, 0)
+
+    def _judge_invocation_success(self, result: JudgeResult) -> bool:
+        invocation = result.metrics.get("provider_invocation")
+        if isinstance(invocation, dict):
+            return bool(invocation.get("success", True))
+        return True

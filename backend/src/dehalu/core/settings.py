@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import ClassVar, Iterable
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    KNOWN_PROVIDERS: ClassVar[frozenset[str]] = frozenset({"auto", "fake", "gemini", "grok", "mistral", "cerebras"})
+
     model_config = SettingsConfigDict(
         env_prefix="DEHALU_",
         env_file=".env",
@@ -20,7 +23,7 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://dehalu:dehalu@localhost:5432/dehalu",
         description="Runtime database URL. Tests override this with SQLite.",
     )
-    default_provider: str = "fake"
+    default_provider: str = "auto"
     default_language: str = "python"
     default_latency_budget_seconds: int = 15
     orchestration_mode: str = "direct"
@@ -101,6 +104,15 @@ class Settings(BaseSettings):
             raise ValueError("orchestration_mode must be 'direct' or 'crewai'")
         return value
 
+    @field_validator("default_provider")
+    @classmethod
+    def validate_default_provider(cls, value: str | None) -> str:
+        provider = (value or "").strip().lower()
+        if provider not in cls.KNOWN_PROVIDERS:
+            options = ", ".join(sorted(cls.KNOWN_PROVIDERS))
+            raise ValueError(f"default_provider must be one of: {options}")
+        return provider
+
     @field_validator(
         "clarification_provider_order",
         "generation_provider_order",
@@ -132,6 +144,24 @@ class Settings(BaseSettings):
     @property
     def cerebras_enabled(self) -> bool:
         return bool(self.cerebras_api_key)
+
+    def resolve_default_provider(self, available_provider_names: Iterable[str]) -> str:
+        available = set(available_provider_names)
+        if self.default_provider == "auto":
+            for name in self.generation_provider_order:
+                if name != "fake" and name in available:
+                    return name
+            if "fake" in available:
+                return "fake"
+            if available:
+                return next(iter(available))
+            return "fake"
+
+        if self.default_provider in available:
+            return self.default_provider
+        if "fake" in available:
+            return "fake"
+        return self.default_provider
 
 
 @lru_cache

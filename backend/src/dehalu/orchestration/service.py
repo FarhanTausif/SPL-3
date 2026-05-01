@@ -60,6 +60,16 @@ def _infer_language(prompt: str) -> str | None:
     return None
 
 
+class RequestedProviderUnavailableError(ValueError):
+    def __init__(self, provider_name: str, available_providers: set[str]) -> None:
+        available = ", ".join(sorted(available_providers)) or "none"
+        super().__init__(
+            f"Provider '{provider_name}' is unavailable. Configure its API key or choose one of: {available}."
+        )
+        self.provider_name = provider_name
+        self.available_providers = tuple(sorted(available_providers))
+
+
 class RunOrchestrator:
     def __init__(self, settings: Settings, providers: ProviderRegistry) -> None:
         language_registry = build_language_registry()
@@ -81,9 +91,12 @@ class RunOrchestrator:
 
     def run(self, request: RunRequest, session: Session) -> RunResponse:
         normalized = normalize_request(request, self.settings)
+        if request.provider is None:
+            normalized = normalized.model_copy(
+                update={"provider": self.settings.resolve_default_provider(self.providers.names())}
+            )
         repository = RunRepository(session)
-        if normalized.provider not in self.providers.names():
-            self.providers.get(normalized.provider)
+        self._ensure_provider_available(normalized.provider)
         if normalized.run_mode == RunMode.basic:
             provider = self.providers.get(normalized.provider)
             execution_result = self.execution_engine.execute(normalized, provider)
@@ -114,7 +127,7 @@ class RunOrchestrator:
         stage_summary: list[StageStatus] = []
         provider_invocations: list[dict] = []
 
-        clarification_provider, clarification, clarification_fallback_used = self._run_clarification_chain(normalized)
+        clarification_provider, clarification, clarification_route = self._run_clarification_chain(normalized)
         provider_invocations.extend(self._collect_provider_invocations_from_clarification(clarification))
         clarification_status = "completed" if not clarification.needs_user_input else "needs_clarification"
         stage_summary.append(
@@ -124,7 +137,7 @@ class RunOrchestrator:
                 {
                     "provider": clarification_provider.name,
                     "ambiguity_flags": clarification.ambiguity_flags,
-                    "fallback_used": clarification_fallback_used,
+                    "fallback_used": clarification_route["fallback_used"],
                 },
             )
         )
@@ -148,7 +161,7 @@ class RunOrchestrator:
         if clarification.needs_user_input:
             return repository.get_run_detail(run_record.id)
 
-        generation_provider, execution_result, generation_fallback_used = self._run_generation_chain(normalized)
+        generation_provider, execution_result, generation_route = self._run_generation_chain(normalized)
         worker_request = normalized.model_copy(update={"provider": generation_provider.name})
         provider_invocations.extend(self._collect_provider_invocations_from_bundle(execution_result.initial_attempt))
         provider_invocations.extend(self._collect_provider_invocations_from_bundle(execution_result.final_attempt))
@@ -158,7 +171,7 @@ class RunOrchestrator:
             self._stage(
                 "generation",
                 "completed",
-                {"provider": generation_provider.name, "fallback_used": generation_fallback_used},
+                {"provider": generation_provider.name, "fallback_used": generation_route["fallback_used"]},
             )
         )
         repository.update_stage_status(
@@ -196,23 +209,43 @@ class RunOrchestrator:
             lease_seconds=self.settings.worker_lease_seconds,
         )
 
-        judge_providers = self.router.get_judge_providers() or [generation_provider]
-        judge_results = [
-            provider.judge(
+        judge_available = self.router.get_judge_providers()
+        judge_candidates = judge_available or [generation_provider]
+        judge_attempts: list[dict] = []
+        judge_results = []
+        for provider in judge_candidates:
+            result = provider.judge(
                 worker_request,
                 final_attempt.coder_output,
                 final_attempt.extracted_claims,
                 final_attempt.static_findings,
                 final_attempt.sandbox_result,
             )
-            for provider in judge_providers
-        ]
-        for result in judge_results:
+            invocation = result.metrics.get("provider_invocation")
+            judge_attempts.append(self._attempt_payload(provider.name, invocation))
+            if self._invocation_success(invocation):
+                judge_results.append(result)
             provider_invocations.extend(self._collect_provider_invocations_from_judge(result))
+        if not judge_results:
+            fallback_provider = judge_candidates[-1]
+            fallback_result = fallback_provider.judge(
+                worker_request,
+                final_attempt.coder_output,
+                final_attempt.extracted_claims,
+                final_attempt.static_findings,
+                final_attempt.sandbox_result,
+            )
+            judge_results = [fallback_result]
+            invocation = fallback_result.metrics.get("provider_invocation")
+            judge_attempts.append(self._attempt_payload(fallback_provider.name, invocation))
+            provider_invocations.extend(self._collect_provider_invocations_from_judge(fallback_result))
 
-        cove_providers = self.router.get_cove_providers() or [generation_provider]
-        cove_results = [
-            provider.cove(
+        cove_available = self.router.get_cove_providers()
+        cove_candidates = cove_available or [generation_provider]
+        cove_attempts: list[dict] = []
+        cove_results = []
+        for index, provider in enumerate(cove_candidates):
+            result = provider.cove(
                 worker_request,
                 final_attempt.coder_output,
                 final_attempt.extracted_claims,
@@ -220,12 +253,27 @@ class RunOrchestrator:
                 final_attempt.sandbox_result,
                 judge_results[min(index, len(judge_results) - 1)],
             )
-            for index, provider in enumerate(cove_providers)
-        ]
-        for result in cove_results:
+            invocation = result.metrics.get("provider_invocation")
+            cove_attempts.append(self._attempt_payload(provider.name, invocation))
+            if self._invocation_success(invocation):
+                cove_results.append(result)
             provider_invocations.extend(self._collect_provider_invocations_from_cove(result))
+        if not cove_results:
+            fallback_provider = cove_candidates[-1]
+            fallback_result = fallback_provider.cove(
+                worker_request,
+                final_attempt.coder_output,
+                final_attempt.extracted_claims,
+                final_attempt.static_findings,
+                final_attempt.sandbox_result,
+                judge_results[-1],
+            )
+            cove_results = [fallback_result]
+            invocation = fallback_result.metrics.get("provider_invocation")
+            cove_attempts.append(self._attempt_payload(fallback_provider.name, invocation))
+            provider_invocations.extend(self._collect_provider_invocations_from_cove(fallback_result))
 
-        panel = self._build_panel([provider.name for provider in judge_providers], judge_results, cove_results)
+        panel = self._build_panel([result.provider for result in judge_results], judge_results, cove_results)
         repair_selection = self.router.choose_repair_provider(
             judge_results=judge_results,
             generation_provider=generation_provider,
@@ -307,14 +355,43 @@ class RunOrchestrator:
                     EvidenceKind.routing,
                     {
                         "clarification_provider": clarification_provider.name,
-                        "clarification_fallback_used": clarification_fallback_used,
+                        "clarification_fallback_used": clarification_route["fallback_used"],
                         "generation_provider": generation_provider.name,
-                        "generation_fallback_used": generation_fallback_used,
+                        "generation_fallback_used": generation_route["fallback_used"],
                         "judge_panel": panel.providers,
-                        "cove_providers": [provider.name for provider in cove_providers],
+                        "cove_providers": [result.provider for result in cove_results],
                         "repair_provider": repair_selection.provider_name,
                         "repair_reason": repair_selection.reason,
                         "repair_fallback_used": repair_selection.fallback_used,
+                        "repair_selected_via": repair_selection.selected_via,
+                        "repair_candidate_chain": list(repair_selection.candidate_chain),
+                        "role_routes": {
+                            "clarification": clarification_route,
+                            "generation": generation_route,
+                            "judge": {
+                                "configured": list(self.router.matrix.judges),
+                                "available": [provider.name for provider in judge_available],
+                                "selected": [result.provider for result in judge_results],
+                                "fallback_used": any(not self._invocation_success(item.get("invocation")) for item in judge_attempts)
+                                or not bool(judge_available),
+                                "attempts": judge_attempts,
+                            },
+                            "cove": {
+                                "configured": list(self.router.matrix.cove),
+                                "available": [provider.name for provider in cove_available],
+                                "selected": [result.provider for result in cove_results],
+                                "fallback_used": any(not self._invocation_success(item.get("invocation")) for item in cove_attempts)
+                                or not bool(cove_available),
+                                "attempts": cove_attempts,
+                            },
+                            "repair": {
+                                "configured": list(self.router.matrix.repair),
+                                "selected": repair_selection.provider_name,
+                                "fallback_used": repair_selection.fallback_used,
+                                "selected_via": repair_selection.selected_via,
+                                "candidate_chain": list(repair_selection.candidate_chain),
+                            },
+                        },
                         "routing_policy_version": self.settings.routing_policy_version,
                         "prompt_policy_version": self.settings.prompt_policy_version,
                     },
@@ -406,44 +483,106 @@ class RunOrchestrator:
         now = datetime.now(timezone.utc)
         return StageStatus(stage=name, status=status, started_at=now, finished_at=now, details=details or {})
 
-    def _run_clarification_chain(self, normalized: NormalizedRequest) -> tuple[LLMProvider, ClarificationResult, bool]:
+    def _ensure_provider_available(self, provider_name: str) -> None:
+        available = set(self.providers.names())
+        if provider_name in available:
+            return
+        if provider_name in (self.settings.KNOWN_PROVIDERS - {"auto"}):
+            raise RequestedProviderUnavailableError(provider_name, available)
+        self.providers.get(provider_name)
+
+    def _run_clarification_chain(self, normalized: NormalizedRequest) -> tuple[LLMProvider, ClarificationResult, dict[str, object]]:
         candidates = self.router.get_clarification_candidates()
+        configured = list(self.router.matrix.clarification)
         if not candidates:
-            requested = normalized.provider if normalized.provider in self.providers.names() else self.settings.default_provider
+            requested = (
+                normalized.provider
+                if normalized.provider in self.providers.names()
+                else self.settings.resolve_default_provider(self.providers.names())
+            )
             candidates = [self.providers.get(requested)]
+            configured = [requested]
+        attempts: list[dict] = []
         fallback_used = False
         for index, provider in enumerate(candidates):
             clarification = provider.clarify(normalized)
             invocation = clarification.metadata.get("provider_invocation", {})
+            attempts.append(self._attempt_payload(provider.name, invocation))
             if invocation.get("success", True) or index == len(candidates) - 1:
-                return provider, clarification, fallback_used
+                return provider, clarification, {
+                    "configured": configured,
+                    "available": [candidate.name for candidate in candidates],
+                    "selected": provider.name,
+                    "fallback_used": fallback_used,
+                    "attempts": attempts,
+                }
             fallback_used = True
         provider = candidates[-1]
-        return provider, provider.clarify(normalized), True
+        clarification = provider.clarify(normalized)
+        attempts.append(self._attempt_payload(provider.name, clarification.metadata.get("provider_invocation")))
+        return provider, clarification, {
+            "configured": configured,
+            "available": [candidate.name for candidate in candidates],
+            "selected": provider.name,
+            "fallback_used": True,
+            "attempts": attempts,
+        }
 
     def _run_generation_chain(self, normalized: NormalizedRequest):
         candidates = self.router.get_generation_candidates(normalized.provider)
+        configured = list(self.router.matrix.generation)
         if not candidates:
             candidates = [self.providers.get(normalized.provider)]
+            configured = [normalized.provider]
         fallback_used = False
+        attempts: list[dict] = []
         last_error: Exception | None = None
         for index, provider in enumerate(candidates):
             try:
                 worker_request = normalized.model_copy(update={"provider": provider.name})
-                return provider, self.execution_engine.execute(worker_request, provider), fallback_used
+                execution = self.execution_engine.execute(worker_request, provider)
+                attempts.append(self._attempt_payload(provider.name, {"success": True}))
+                return provider, execution, {
+                    "configured": configured,
+                    "available": [candidate.name for candidate in candidates],
+                    "selected": provider.name,
+                    "fallback_used": fallback_used,
+                    "attempts": attempts,
+                }
             except ProviderExecutionError as exc:
                 last_error = exc
+                attempts.append(self._attempt_payload(provider.name, exc.record.model_dump(mode="json")))
                 if index < len(candidates) - 1:
                     fallback_used = True
                     continue
                 raise
             except Exception as exc:
                 last_error = exc
-                if index < len(candidates) - 1:
-                    fallback_used = True
-                    continue
+                attempts.append(
+                    self._attempt_payload(
+                        provider.name,
+                        {"success": False, "failure_kind": "internal_error", "message": str(exc)},
+                    )
+                )
                 raise
         raise last_error or RuntimeError("No generation provider could execute the run.")
+
+    def _attempt_payload(self, provider_name: str, invocation: dict | None) -> dict:
+        payload: dict = {"provider": provider_name}
+        if isinstance(invocation, dict):
+            payload["invocation"] = invocation
+            payload["success"] = invocation.get("success", True)
+            payload["failure_kind"] = invocation.get("failure_kind", "none")
+        else:
+            payload["invocation"] = None
+            payload["success"] = True
+            payload["failure_kind"] = "none"
+        return payload
+
+    def _invocation_success(self, invocation: dict | None) -> bool:
+        if isinstance(invocation, dict):
+            return bool(invocation.get("success", True))
+        return True
 
     def _collect_provider_invocations_from_clarification(self, clarification: ClarificationResult) -> list[dict]:
         invocation = clarification.metadata.get("provider_invocation")

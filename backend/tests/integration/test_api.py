@@ -58,16 +58,28 @@ def _json_candidate(payload: dict[str, object]) -> dict[str, object]:
 
 async def test_health_endpoint(client: AsyncClient) -> None:
     response = await client.get("/health")
+    payload = response.json()
 
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-    assert response.json()["providers"]["fake"] is True
-    assert response.json()["orchestration"]["configured_mode"] == "direct"
-    assert response.json()["orchestration"]["crewai_enabled"] is False
-    assert response.json()["orchestration"]["advanced_run_mode"] == "worker_backed"
-    assert response.json()["orchestration"]["queue_backlog"]["queued"] == 0
-    assert response.json()["orchestration"]["provider_role_readiness"]["routing_policy_version"] == "v1"
-    assert response.json()["orchestration"]["provider_health_details"]["fake"]["live_smoke_check"] == "skipped"
+    assert payload["status"] == "ok"
+    assert payload["providers"]["fake"] is True
+    assert payload["orchestration"]["configured_mode"] == "direct"
+    assert payload["orchestration"]["crewai_enabled"] is False
+    assert payload["orchestration"]["advanced_run_mode"] == "worker_backed"
+    assert payload["orchestration"]["queue_backlog"]["queued"] == 0
+    assert payload["orchestration"]["queue_backlog"]["total"] == 0
+    assert payload["orchestration"]["queue_backlog"]["has_backlog"] is False
+    assert payload["orchestration"]["worker_freshness"]["age_seconds"] is None
+    assert payload["orchestration"]["worker_freshness"]["stale_after_seconds"] > 0
+    assert payload["orchestration"]["worker_readiness"]["state"] == "idle"
+    assert payload["orchestration"]["worker_readiness"]["ready"] is True
+    assert payload["orchestration"]["provider_role_readiness"]["routing_policy_version"] == "v1"
+    assert payload["orchestration"]["provider_role_readiness"]["roles"]["generation"]["selected"] is None
+    assert payload["orchestration"]["provider_role_readiness"]["live_provider_operation_ready"] is False
+    assert payload["orchestration"]["provider_health_details"]["fake"]["live_smoke_check"] == "skipped"
+    assert payload["orchestration"]["provider_health_details"]["fake"]["ready_for_live_routing"] is True
+    assert payload["orchestration"]["live_provider_readiness"]["configured_live_providers"] == []
+    assert payload["orchestration"]["live_provider_readiness"]["live_provider_operation_ready"] is False
 
 
 async def test_create_and_fetch_run(client: AsyncClient) -> None:
@@ -113,6 +125,29 @@ async def test_create_run_rejects_unknown_provider(client: AsyncClient) -> None:
     )
 
     assert response.status_code == 400
+    assert response.json()["detail"] == "Unknown provider 'missing'."
+
+
+async def test_create_run_rejects_unavailable_provider_with_clear_message(
+    db_session: Session,
+) -> None:
+    settings = Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)
+    registry = build_provider_registry(settings)
+    app = _build_test_app(settings, registry, db_session)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as test_client:
+        response = await test_client.post(
+            "/v1/runs",
+            json={"prompt": "Write Python code.", "provider": "gemini"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Provider 'gemini' is unavailable. Configure its API key or choose one of: fake."
+    )
 
 
 async def test_create_run_repairs_fake_output_and_returns_final_accept(client: AsyncClient) -> None:
@@ -270,6 +305,72 @@ async def test_create_run_with_gemini_provider_persists_judge_cove_and_repair_me
         "cove",
         "policy",
     }
+
+
+async def test_create_run_without_provider_uses_configured_live_default(
+    db_session: Session,
+) -> None:
+    responses = iter(
+        [
+            httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {"content": {"parts": [{"text": "import math\n\nprint(math.sqrt(4))\n"}]}}
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                json=_json_candidate(
+                    {
+                        "verdict": "pass",
+                        "hallucination_score": 0.08,
+                        "findings": [],
+                        "metrics": {"judge_mode": "gemini"},
+                    }
+                ),
+            ),
+            httpx.Response(
+                200,
+                json=_json_candidate(
+                    {
+                        "checks": [
+                            {
+                                "claim": "math.sqrt",
+                                "question": "Does the code use math.sqrt?",
+                                "answer": "Yes.",
+                                "verdict": "supported",
+                                "metadata": {"kind": "symbol"},
+                            }
+                        ],
+                        "findings": [],
+                        "hallucination_score": 0.08,
+                    }
+                ),
+            ),
+        ]
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: next(responses)))
+    settings = Settings(database_url="sqlite://", default_provider="auto", gemini_api_key="test-key")
+    registry = build_provider_registry(settings, gemini_http_client=client)
+    app = _build_test_app(settings, registry, db_session)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as test_client:
+        response = await test_client.post(
+            "/v1/runs",
+            json={"prompt": "Write Python code that computes a square root."},
+        )
+
+    payload = response.json()
+
+    assert response.status_code == 201
+    assert payload["coder_output"]["provider"] == "gemini"
+    assert payload["judge_result"]["provider"] == "gemini"
+    assert payload["cove_result"]["provider"] == "gemini"
 
 
 async def test_create_run_in_crewai_mode_matches_direct_for_clean_fake(

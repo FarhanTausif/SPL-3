@@ -407,8 +407,56 @@ class RunDetail(BaseModel):
     evidence_summary: dict[str, int]
 
 
+class HealthProviderDetails(BaseModel):
+    configured: bool
+    api_key_present: bool
+    smoke_check_enabled: bool
+    live_smoke_check: str
+    models: dict[str, str] = Field(default_factory=dict)
+    retry_attempts: int = Field(default=0, ge=0)
+    healthy: bool
+    ready_for_live_routing: bool
+
+
+class HealthWorkerFreshness(BaseModel):
+    worker_id: str
+    last_heartbeat_at: str | None = None
+    fresh: bool
+    age_seconds: float | None = None
+    stale_after_seconds: int = Field(ge=1)
+
+
+class HealthQueueBacklog(BaseModel):
+    queued: int = Field(ge=0)
+    running: int = Field(ge=0)
+    total: int = Field(ge=0)
+    has_backlog: bool
+
+
+class HealthWorkerReadiness(BaseModel):
+    state: str
+    ready: bool
+    backlog_aware: bool
+
+
+class HealthOrchestration(BaseModel):
+    configured_mode: str
+    crewai_available: bool
+    crewai_enabled: bool
+    advanced_run_mode: str
+    worker_id: str
+    worker_freshness: HealthWorkerFreshness
+    queue_backlog: HealthQueueBacklog
+    worker_readiness: HealthWorkerReadiness
+    provider_role_readiness: dict[str, Any] = Field(default_factory=dict)
+    routing_policy_version: str
+    prompt_policy_version: str
+    provider_health_details: dict[str, HealthProviderDetails] = Field(default_factory=dict)
+    live_provider_readiness: dict[str, Any] = Field(default_factory=dict)
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str
     providers: dict[str, bool]
-    orchestration: dict[str, Any] = Field(default_factory=dict)
+    orchestration: HealthOrchestration
