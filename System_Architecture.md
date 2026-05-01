@@ -6,7 +6,7 @@ DeHalu is a language-agnostic hallucination detection and mitigation system for 
 
 The system is intentionally lightweight. It does not rely on GPU training, fine-tuning, or mandatory RAG. Instead, it combines `CrewAI`-orchestrated multi-agent verification with deterministic parsing and validation using `Tree-sitter`, bounded execution checks, and structured audit logging. The result is a maintainable, provider-agnostic architecture that can work with Gemini, Grok, Mistral, Cerebras, or a local coder model while remaining ready for future context integration.
 
-The application should be split into a `backend/` and `frontend/` boundary from day one. The backend should be a Python `FastAPI` service that owns orchestration, verification, tool access, and state. The frontend should be a `Next.js` app that handles operator workflows, inspection views, and end-user interaction without embedding verification logic.
+Current implementation is backend-first. `backend/src/dehalu/` is the authoritative runtime for orchestration, verification, mitigation triggers, tool access, and state. A frontend boundary can be added later, but mitigation architecture and run lifecycle are currently owned by backend modules.
 
 Recommended backend stack:
 
@@ -57,157 +57,100 @@ Every decision in the pipeline should produce structured evidence. The system mu
 
 ## High-Level Diagram (Mermaid)
 
+This flow makes mitigation explicit and first-class, while preserving both direct (`RunMode.basic`) and worker-backed (`RunMode.advanced`) execution paths.
+
 ```mermaid
 graph TD
-    U[User / IDE / API Client] --> FE[Frontend: Next.js App]
-    FE --> API[Backend API: FastAPI]
+    U[User / Client] --> API[FastAPI API]
+    API --> RM{Run mode}
+    RM -->|basic/direct| O1[RunOrchestrator.run]
+    RM -->|advanced/worker-backed| Q[Queue run in state repository]
+    Q --> W[RunWorker.run_once]
+    W --> O2[RunOrchestrator.process_claimed_run]
 
-    API --> O[Orchestrator]
-    O --> C[Clarification Agent]
-    C --> O
+    O1 --> N[Normalize request]
+    O2 --> C[Clarification chain]
+    C --> N
+    N --> G[Generate code draft]
+    G --> V[Verification pipeline]
 
-    O --> P[Producer: Single Coder Agent]
-    P --> LA[LLM Provider Adapter]
-    LA --> D[Code Draft]
+    V --> VC[Claim extraction]
+    V --> VS[Static analysis]
+    V --> VX[Sandbox verification]
+    V --> VJ[Judge]
+    V --> VV[CoVe]
+    V --> VP[Policy decision]
 
-    D --> PE[Claim Extractor]
-    PE --> J[Judge Panel / LLM-as-a-Judge]
-    PE --> CV[CoVe / Self-Consistency Verifier]
-    PE --> SA[Static Analysis: Tree-sitter + Rules]
-    PE --> SX[Sandbox Validation]
-    O --> TG[Tool Gateway: MCP + Custom Tools]
-    TG --> P
-    TG --> J
-    TG --> CV
-    TG --> M
+    VP -->|accept / warn_and_return_partial| R[Return response + evidence]
+    VP -->|repair_and_retry| FC[Build failure context from attempt-1 evidence]
+    VP -->|reject| F[Fail closed + evidence]
 
-    J --> DP[Detection & Policy Engine]
-    CV --> DP
-    SA --> DP
-    SX --> DP
+    FC --> M[Mitigation loop: repair/fixer]
+    M --> G2[Generate repaired draft]
+    G2 --> V2[Re-run verification with allow_repair=false]
+    V2 --> VP2[Final policy decision]
+    VP2 -->|accept or warn| R
+    VP2 -->|reject| F
 
-    DP -->|No hallucination| R[Response Composer]
-    DP -->|Hallucination detected| M[Mitigation Engine]
-    DP -->|Need clarification| C
-    M --> P
-    R --> API
-    API --> FE
-    FE --> U
+    V --> T[Tool gateway verifier suite]
+    T --> VP
 
-    O --> CFG[(Prompt / Policy Config)]
-    J --> EV[(Verification Evidence Store)]
-    CV --> EV
-    SA --> EV
-    SX --> EV
-    DP --> AUD[(Audit / Decision Log)]
-    API --> FB[(Feedback / Outcomes)]
-
-    O -. future plug-in .-> CP[Context Provider Interface]
-    CP -. optional later .-> RG[(RAG / MCP Context Store)]
+    R --> S[(state.runs + evidence + events)]
+    F --> S
 ```
 
-## Directory Structure
+## Directory Structure (Current Repository Alignment)
 
-The project should be structured as a clean monorepo with explicit `backend/` and `frontend/` separation. The backend owns all DeHalu logic. The frontend is a thin product surface over backend APIs.
+The implementation today is backend-centered and the mitigation pipeline is currently distributed across orchestration, verification policy, adapters, and state modules.
 
 ```text
-dehalu/
+SPL-3/
 ├── backend/
-│   ├── src/
-│   │   └── dehalu/
-│   │       ├── api/
-│   │       ├── core/
-│   │       ├── orchestration/
-│   │       ├── agents/
-│   │       ├── adapters/
-│   │       │   ├── llm/
-│   │       │   ├── language/
-│   │       │   ├── tools/
-│   │       │   └── context/
-│   │       ├── verification/
-│   │       │   ├── claims/
-│   │       │   ├── judges/
-│   │       │   ├── static_analysis/
-│   │       │   ├── sandbox/
-│   │       │   └── policy/
-│   │       ├── mitigation/
-│   │       ├── state/
-│   │       ├── schemas/
-│   │       ├── telemetry/
-│   │       └── utils/
-│   ├── tests/
-│   │   ├── unit/
-│   │   ├── integration/
-│   │   ├── fixtures/
-│   │   └── evaluation/
-│   ├── alembic/
-│   ├── pyproject.toml
-│   └── Dockerfile
-├── frontend/
-│   ├── app/
-│   ├── components/
-│   ├── lib/
-│   ├── hooks/
-│   ├── types/
-│   ├── public/
-│   ├── package.json
-│   └── next.config.ts
-├── config/
-│   ├── backend/
-│   ├── frontend/
-│   └── prompts/
-├── docs/
-├── scripts/
-├── examples/
-├── artifacts/
-│   ├── audit/
-│   ├── evidence/
-│   └── reports/
+│   ├── src/dehalu/
+│   │   ├── api/
+│   │   ├── orchestration/
+│   │   ├── verification/
+│   │   │   ├── claims/
+│   │   │   ├── judges/
+│   │   │   ├── static_analysis/
+│   │   │   ├── sandbox/
+│   │   │   └── policy/
+│   │   ├── adapters/
+│   │   │   ├── llm/
+│   │   │   ├── language/
+│   │   │   └── tools/
+│   │   ├── agents/
+│   │   ├── state/
+│   │   ├── schemas/
+│   │   ├── core/
+│   │   ├── telemetry/
+│   │   └── worker.py
+│   └── tests/
 ├── Papers/
 ├── graphify-out/
-├── System_Design.md
-└── system_architecture.md
+├── MITIGATION_PIPELINE_HIGH_LEVEL_DESIGN.md
+└── System_Architecture.md
 ```
 
-Core directory descriptions:
+Current mitigation responsibility map (first-class in flow, distributed in code):
 
-- `backend/src/dehalu/api/` — FastAPI routers, request handlers, and API wiring.
-- `backend/src/dehalu/core/` — settings, dependency injection, security, and shared application bootstrap.
-- `backend/src/dehalu/orchestration/` — top-level workflow control, routing, deadlines, and request lifecycle management.
-- `backend/src/dehalu/agents/` — CrewAI agent definitions, task contracts, and crew assembly.
-- `backend/src/dehalu/adapters/llm/` — provider wrappers for Gemini, Grok, Mistral, Cerebras, and local models.
-- `backend/src/dehalu/adapters/language/` — language-specific parsing, symbol, import, and execution adapter interfaces.
-- `backend/src/dehalu/adapters/tools/` — MCP connectors and custom tool wrappers exposed to agents.
-- `backend/src/dehalu/adapters/context/` — future context-provider connectors for docs or retrieval systems.
-- `backend/src/dehalu/verification/claims/` — claim extraction and normalization from coder outputs.
-- `backend/src/dehalu/verification/judges/` — judge panel logic, CoVe logic, debate, consensus, and score fusion.
-- `backend/src/dehalu/verification/static_analysis/` — Tree-sitter parsing, AST checks, dependency plausibility, and rule evaluation.
-- `backend/src/dehalu/verification/sandbox/` — bounded compile, run, and probe execution layer.
-- `backend/src/dehalu/verification/policy/` — threshold logic, hard-fail rules, and final detection decisions.
-- `backend/src/dehalu/mitigation/` — repair, retry, clarification, downgrade, and fail-closed flows.
-- `backend/src/dehalu/state/` — persistence interfaces for requests, evidence, audit artifacts, and feedback.
-- `backend/src/dehalu/schemas/` — shared request, response, metric, and evidence models.
-- `backend/src/dehalu/telemetry/` — structured logging, counters, traces, and monitoring hooks.
-- `backend/src/dehalu/utils/` — small shared helpers with no domain ownership.
-- `backend/tests/` — backend unit, integration, and evaluation tests.
-- `backend/alembic/` — database migration scripts for audit and evidence storage.
-- `frontend/app/` — Next.js App Router entrypoints and route-level UI composition.
-- `frontend/components/` — reusable UI components for runs, evidence views, and admin pages.
-- `frontend/lib/` — API client, request helpers, and frontend-side service utilities.
-- `frontend/hooks/` — React hooks for polling runs, loading evidence, and managing UI state.
-- `frontend/types/` — typed API contracts and generated frontend-facing schemas.
-- `frontend/public/` — static assets.
-- `config/backend/` — backend service settings, policy thresholds, and provider configs.
-- `config/frontend/` — frontend runtime config and environment-specific UI settings.
-- `config/prompts/` — managed prompt templates and verifier prompt variants.
-- `docs/` — design docs, protocol docs, and operator guidance.
-- `scripts/` — local dev, evaluation, and report-generation scripts.
-- `examples/` — minimal example runs and sample request/response traces.
-- `artifacts/audit/` — persisted decision logs for manual inspection.
-- `artifacts/evidence/` — structured verification evidence emitted by each run.
-- `artifacts/reports/` — generated summaries, evaluation outputs, and diagnostics.
-- `Papers/` — source research corpus used to drive and justify design choices.
-- `graphify-out/` — graph outputs and reports backing the current architecture reasoning.
+- **Mitigation orchestration and retry loop**  
+  `backend/src/dehalu/orchestration/execution.py`  
+  (`_ExecutionStages.generate_repair_output`, repair re-verification stages, max two-attempt flow)
+- **Mode-aware orchestration (direct + worker-backed)**  
+  `backend/src/dehalu/orchestration/service.py`, `backend/src/dehalu/worker.py`
+- **Verification policy and mitigation trigger**  
+  `backend/src/dehalu/verification/policy/engine.py`  
+  (`repair_and_retry`, `reject`, `warn_and_return_partial`, `accept`)
+- **Mitigation-capable provider/tool adapters**  
+  `backend/src/dehalu/adapters/llm/*` (`repair(...)`) and `backend/src/dehalu/adapters/tools/gateway.py`
+- **Mitigation state, evidence, and audit trail**  
+  `backend/src/dehalu/state/repository.py`, `backend/src/dehalu/state/models.py`, `backend/src/dehalu/schemas/contracts.py`
+
+Extension point for a future dedicated mitigation module:
+
+- Add `backend/src/dehalu/mitigation/` only when mitigation logic outgrows current orchestration ownership.
+- Keep current contracts stable (`RepairAttempt`, `RepairResult`, `PolicyDecision`) so the module can be introduced without API/schema churn.
 
 ## Component Breakdown
 
@@ -408,40 +351,41 @@ Backend ownership:
 
 ## Interaction Pattern
 
-### Verification Loop
+### Verification + Mitigation Loop
 
 The core loop is:
 
-`Generate -> Parse -> Validate -> Correct`
+`Normalize/Enhance -> Generate -> Verify -> Policy -> (Mitigate if needed) -> Re-verify -> Return`
 
 Detailed behavior:
 
-1. `Generate`  
-   The `CoderAgent` produces one code draft and a minimal structured envelope of assumptions and dependencies.
+1. `Normalize + Enhance`  
+   Request normalization runs first (`normalize_request` in orchestration), with clarification in worker-backed mode before generation.
 
-2. `Parse`  
-   The claim extractor and Tree-sitter parser turn the draft into structured claims, AST features, imports, symbols, and execution candidates.
+2. `Generate`  
+   The coder/generation provider produces one draft plus assumptions/dependency metadata.
 
-3. `Validate`  
+3. `Verify`  
+   Optional fast reviewer/tool pass can run via the tool gateway in advanced mode, then core verification runs.  
    Validation runs across three channels in parallel where possible:
    - judge-based hallucination scoring
    - deterministic static analysis
    - bounded sandbox execution
 
-4. `Detect`  
-   The policy engine fuses metric scores and hard-fail flags into one hallucination decision.
+4. `Policy decision`  
+   The policy engine fuses deterministic + judge/CoVe evidence and returns `accept`, `warn_and_return_partial`, `repair_and_retry`, or `reject`.
 
-5. `Correct`  
-   Only if hallucination is detected:
-   - ask for clarification
-   - regenerate with stronger constraints
-   - patch the output through a repair agent
-   - fail closed if correctness cannot be established
+5. `Mitigate`  
+   Only when policy returns `repair_and_retry`, orchestration builds a failure context from attempt-1 evidence, calls provider `repair(...)`, and reruns verification once with `allow_repair=False`.
 
-6. `Return`  
-   If no hallucination is detected, the response is returned directly with its evidence recorded.
+6. `Return / fail closed`  
+   - If final policy is acceptable, return code + report.  
+   - If final policy is `reject`, fail closed with full evidence and audit state.
 
-The important constraint is that correction is conditional. DeHalu should not mutate outputs unless the detection layer finds a reason to intervene.
+Important constraints:
+
+- Mitigation is conditional on policy (`repair_and_retry`) and never unconditional.
+- The same mitigation contract works in both direct execution and worker-backed execution.
 
 ## Future-Proofing Roadmap
 

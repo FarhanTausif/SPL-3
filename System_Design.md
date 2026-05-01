@@ -320,6 +320,19 @@ Mitigation actions:
 - downgrade to explanation-only answer
 - fail closed
 
+Policy triggers for mitigation entry:
+
+- `PolicyDecisionState.repair_and_retry` from `backend/src/dehalu/verification/policy/engine.py`
+- hard-fail hallucination evidence from judge/CoVe/static/sandbox
+- uncertain verdicts crossing risk-sensitive thresholds (`judge_uncertain`, `cove_uncertain`)
+
+Stop conditions for mitigation:
+
+- policy returns `accept`
+- retry budget is exhausted (see Mitigation Subsystem)
+- hard-fail evidence persists after retry
+- clarification is required and cannot be auto-resolved
+
 Justification:
 
 Mitigation must be explicit and policy-driven, not improvised per request. The system should not repair by default. It should first determine whether hallucination is actually present, then mitigate only when the detection layer crosses a threshold or triggers a hard-fail rule.
@@ -329,6 +342,52 @@ Evidence:
 - `Mitigation Strategies`
 - `Code Hallucination Taxonomy and Benchmarks`
 - `Systematic Literature Review of Code Hallucinations`
+
+### 9A. Mitigation Subsystem (FailureContext + Fixer Loop)
+
+Mitigation is a first-class subsystem, not an implicit side effect. In the current backend (`backend/src/dehalu/orchestration/execution.py`), the loop is explicit through `initial_attempt`, optional `repair` attempt, and re-verification before final policy.
+
+FailureContext contract (built when policy requests mitigation):
+
+- run metadata: `run_id`, language, risk level, latency remaining
+- failing attempt snapshot: code, extracted claims, judge/CoVe/static/sandbox findings
+- policy trigger and reasons: `RepairTrigger` + decision metrics
+- optional tool evidence from verifier/tooling passes (`ToolInvocationRecord`)
+
+Fixer Agent behavior:
+
+- implemented as repair stage (`provider.repair(...)`) coordinated by `_ExecutionStages.generate_repair_output`
+- receives FailureContext-equivalent inputs from the initial attempt bundle
+- can use MCP-backed tooling through the `ToolGateway` surface (`backend/src/dehalu/adapters/tools/gateway.py`) for grounded fixes and evidence linking
+
+Mitigation loop semantics:
+
+1. Verification fails and policy emits `repair_and_retry`.
+2. Build `FailureContext`.
+3. Invoke Fixer Agent to produce revised code.
+4. Re-run the same layered verification stack (claims → judge/CoVe → static → sandbox → policy).
+5. Repeat until success or retry budget is exhausted.
+
+Retry budget (max N):
+
+- design contract: bounded retries with `max_mitigation_attempts = N`
+- current implementation default: `N = 1` repair attempt (single retry) by setting `allow_repair=False` on the re-verification policy pass
+- this preserves the architecture decision: single draft generation + layered verification + conditional mitigation only after detected risk
+
+Terminal outcomes:
+
+- `accept`: repaired output verified and released
+- `warn_and_return_partial`: constrained output with warnings
+- `clarify`: request additional user constraints
+- `reject`: fail closed with evidence-backed reasons
+
+Evidence artifacts persisted per mitigation cycle:
+
+- `RepairAttempt` / `RepairResult` (attempt number, trigger, summary, outcome)
+- policy decision snapshots (initial and post-repair)
+- verification artifacts for each attempt (claims, judge, CoVe, static, sandbox)
+- tool invocation records and routing/provider invocation metadata
+- orchestration trace and stage timeline for audit/replay
 
 ### 10. Observability and Evidence Store
 
@@ -424,9 +483,11 @@ graph TD
     X --> P
 
     P -->|No hallucination detected| R[Final Response Composer]
-    P -->|Hallucination detected| M[Repair Agent / Mitigation]
+    P -->|Hallucination detected| F[FailureContext Builder]
     P -->|Clarify| C
-    M --> G
+    F --> M[Fixer Agent + MCP Tools]
+    M --> L[Re-Verification Loop (max N)]
+    L --> CE
     R --> U
 
     O --> PS[(Prompt Templates / Policies)]
@@ -467,9 +528,11 @@ graph TD
     - ask for clarification
     - return a constrained answer with warnings
     - reject
-11. Mitigation is triggered only after hallucination is detected by threshold breach or hard-fail evidence such as invalid imports, impossible APIs, or failed execution probes.
-12. All evidence and decisions are logged for later analysis.
-13. User feedback is recorded to improve prompt templates, provider routing, and policy thresholds.
+11. If policy returns `repair_and_retry`, the system builds `FailureContext` from the failed attempt and invokes the Fixer Agent (with optional MCP tools) under a bounded retry budget (`max N`).
+12. Every repaired candidate is re-verified through the same layered stack before any release decision.
+13. The loop stops on accept, clarification-required, reject, or budget exhaustion.
+14. All evidence and decisions are logged for later analysis.
+15. User feedback is recorded to improve prompt templates, provider routing, and policy thresholds.
 
 ## Non-Training Mitigation Strategy
 
@@ -615,6 +678,7 @@ The MVP should be evaluated on:
 - Latency target: `5-15s`
 - Coder count: `1`
 - Judge panel size: `1-3` models depending latency budget
+- Mitigation retry budget (`max_mitigation_attempts`): `1` (single repair retry in current backend)
 - No model training or fine-tuning in MVP
 - No mandatory RAG in MVP
 - Language support through adapters, not language-specific orchestration
