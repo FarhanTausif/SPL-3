@@ -74,8 +74,8 @@ async def test_health_endpoint(client: AsyncClient) -> None:
     assert payload["orchestration"]["worker_readiness"]["state"] == "idle"
     assert payload["orchestration"]["worker_readiness"]["ready"] is True
     assert payload["orchestration"]["provider_role_readiness"]["routing_policy_version"] == "v1"
-    assert payload["orchestration"]["provider_role_readiness"]["roles"]["generation"]["selected"] is None
-    assert payload["orchestration"]["provider_role_readiness"]["live_provider_operation_ready"] is False
+    assert payload["orchestration"]["provider_role_readiness"]["roles"]["generation"]["selected"] == "fake"
+    assert payload["orchestration"]["provider_role_readiness"]["live_provider_operation_ready"] is True  # fake provider ready
     assert payload["orchestration"]["provider_health_details"]["fake"]["live_smoke_check"] == "skipped"
     assert payload["orchestration"]["provider_health_details"]["fake"]["ready_for_live_routing"] is True
     assert payload["orchestration"]["live_provider_readiness"]["configured_live_providers"] == []

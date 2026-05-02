@@ -21,3 +21,4 @@ __pycache__/
 # env files
 .env
 .env.local
+.env.prod
