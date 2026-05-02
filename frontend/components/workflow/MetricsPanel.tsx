@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
@@ -32,7 +33,10 @@ interface MetricsPanelProps {
   policyDecision?: 'accept' | 'warn' | 'repair' | 'reject';
 }
 
-export function MetricsPanel({ metrics, policyDecision = 'accept' }: MetricsPanelProps) {
+export const MetricsPanel = memo(function MetricsPanel({ 
+  metrics, 
+  policyDecision = 'accept' 
+}: MetricsPanelProps) {
   const riskScore = metrics.hallucination_risk_score ?? 0.5;
   const confidence = metrics.confidence ?? 0;
   const verification = metrics.verification_progress || {};
@@ -290,4 +294,4 @@ export function MetricsPanel({ metrics, policyDecision = 'accept' }: MetricsPane
       </div>
     </motion.div>
   );
-}
+})

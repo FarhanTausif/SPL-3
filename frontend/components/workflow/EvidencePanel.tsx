@@ -1,9 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Copy, Check } from 'lucide-react';
-import { useState as useStateHook } from 'react';
 
 export interface EvidenceItem {
   kind:
@@ -183,7 +182,10 @@ function EvidenceItemCard({ item }: { item: EvidenceItem }) {
   );
 }
 
-export function EvidencePanel({ evidence, loading = false }: EvidencePanelProps) {
+export const EvidencePanel = memo(function EvidencePanel({ 
+  evidence, 
+  loading = false 
+}: EvidencePanelProps) {
   return (
     <motion.div
       className="flex flex-col h-full bg-white rounded-lg border border-slate-200"
@@ -226,4 +228,4 @@ export function EvidencePanel({ evidence, loading = false }: EvidencePanelProps)
       </div>
     </motion.div>
   );
-}
+})

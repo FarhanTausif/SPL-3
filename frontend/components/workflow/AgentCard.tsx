@@ -1,8 +1,8 @@
 'use client';
 
+import { memo, ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { CheckCircle2, Clock, Zap } from 'lucide-react';
-import { ReactNode } from 'react';
 
 export type AgentStatus = 'idle' | 'running' | 'complete' | 'error';
 
@@ -48,7 +48,7 @@ const statusConfig = {
   },
 };
 
-export function AgentCard({
+export const AgentCard = memo(function AgentCard({
   name,
   role,
   status,
@@ -173,4 +173,4 @@ export function AgentCard({
       )}
     </motion.div>
   );
-}
+})
