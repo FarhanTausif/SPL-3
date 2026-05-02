@@ -4,10 +4,41 @@
 
 html {
   scroll-behavior: smooth;
+  color-scheme: light dark;
 }
 
 body {
-  @apply bg-gradient-to-br from-slate-50 to-slate-100;
+  @apply bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 text-slate-900 dark:text-slate-50 transition-colors duration-300;
+}
+
+/* Dark mode color overrides */
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  @apply bg-gradient-to-br from-slate-900 to-slate-800;
+}
+
+/* Dark mode component overrides */
+html.dark .glass {
+  @apply bg-slate-800/30 border-slate-700/20;
+}
+
+html.dark .badge-success {
+  @apply bg-green-900 text-green-200;
+}
+
+html.dark .badge-warning {
+  @apply bg-yellow-900 text-yellow-200;
+}
+
+html.dark .badge-error {
+  @apply bg-red-900 text-red-200;
+}
+
+html.dark .badge-info {
+  @apply bg-blue-900 text-blue-200;
 }
 
 /* Accessibility utilities */
