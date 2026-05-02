@@ -89,11 +89,15 @@ function EvidenceItemCard({ item }: { item: EvidenceItem }) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
+      role="region"
+      aria-label={`${config.label} evidence`}
     >
       {/* Header */}
       <motion.button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors"
+        aria-expanded={expanded}
+        aria-controls={`evidence-detail-${item.kind}`}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
         whileHover={{ backgroundColor: 'rgba(15, 23, 42, 0.05)' }}
       >
         <div className="flex items-center gap-3 flex-1 text-left">
@@ -134,6 +138,7 @@ function EvidenceItemCard({ item }: { item: EvidenceItem }) {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
             className="border-t border-slate-200 bg-slate-50 overflow-hidden"
+            id={`evidence-detail-${item.kind}`}
           >
             <div className="p-4 space-y-3">
               {/* Payload Display */}
@@ -147,7 +152,8 @@ function EvidenceItemCard({ item }: { item: EvidenceItem }) {
               <div className="flex gap-2">
                 <button
                   onClick={handleCopy}
-                  className="flex items-center gap-2 px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded text-xs font-medium text-slate-700 transition-colors"
+                  aria-label={copied ? 'Evidence JSON copied to clipboard' : 'Copy evidence JSON to clipboard'}
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded text-xs font-medium text-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {copied ? (
                     <>
@@ -184,18 +190,22 @@ export function EvidencePanel({ evidence, loading = false }: EvidencePanelProps)
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
+      role="region"
+      aria-label="Evidence collection results"
+      aria-live="polite"
+      aria-busy={loading}
     >
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-transparent">
         <h3 className="font-semibold text-sm text-slate-900">
-          📊 Evidence Collected ({evidence.length})
+          📊 Evidence Collected (<span aria-live="polite">{evidence.length}</span>)
         </h3>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {loading ? (
-          <div className="flex items-center justify-center h-32">
+          <div className="flex items-center justify-center h-32" role="status" aria-label="Loading evidence">
             <motion.div
               animate={{ rotate: 360 }}
               transition={{ duration: 1, repeat: Infinity }}
@@ -203,7 +213,7 @@ export function EvidencePanel({ evidence, loading = false }: EvidencePanelProps)
             />
           </div>
         ) : evidence.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-slate-500">
+          <div className="flex items-center justify-center h-32 text-slate-500" role="status">
             <p className="text-sm">No evidence collected yet...</p>
           </div>
         ) : (

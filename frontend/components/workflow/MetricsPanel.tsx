@@ -80,13 +80,15 @@ export function MetricsPanel({ metrics, policyDecision = 'accept' }: MetricsPane
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4" role="region" aria-label="Verification metrics and risk assessment">
         {/* Risk Gauge */}
         <motion.div
           className={`p-4 rounded-lg border-2 ${riskLevel.bg} border-slate-200`}
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.3 }}
+          role="img"
+          aria-label={`Hallucination risk gauge showing ${(riskScore * 100).toFixed(0)}% risk level: ${riskLevel.level}`}
         >
           <div className="text-center">
             <p className="text-xs font-medium text-slate-700 mb-2">HALLUCINATION RISK</p>
@@ -100,6 +102,7 @@ export function MetricsPanel({ metrics, policyDecision = 'accept' }: MetricsPane
                     riskScore * 360
                   }deg, #e2e8f0 ${riskScore * 360}deg)`,
                 }}
+                aria-hidden="true"
               />
               <motion.div className="relative bg-white w-20 h-20 rounded-full flex flex-col items-center justify-center">
                 <motion.span
@@ -112,10 +115,11 @@ export function MetricsPanel({ metrics, policyDecision = 'accept' }: MetricsPane
                     duration: 2,
                     repeat: Infinity,
                   }}
+                  aria-hidden="true"
                 >
                   {(riskScore * 100).toFixed(0)}%
                 </motion.span>
-                <span className="text-xs font-medium" style={{ color: riskLevel.color }}>
+                <span className="text-xs font-medium" style={{ color: riskLevel.color }} aria-hidden="true">
                   {riskLevel.level}
                 </span>
               </motion.div>
@@ -123,8 +127,8 @@ export function MetricsPanel({ metrics, policyDecision = 'accept' }: MetricsPane
 
             {/* Confidence */}
             <div className="mt-3 pt-3 border-t border-slate-300">
-              <p className="text-xs text-slate-600 mb-1">CONFIDENCE</p>
-              <motion.div className="w-full bg-slate-300 rounded-full h-2 overflow-hidden">
+              <p className="text-xs text-slate-600 mb-1" id="confidence-label">CONFIDENCE</p>
+              <motion.div className="w-full bg-slate-300 rounded-full h-2 overflow-hidden" aria-hidden="true">
                 <motion.div
                   className="h-full bg-gradient-to-r from-blue-500 to-blue-600"
                   initial={{ width: 0 }}
@@ -132,7 +136,7 @@ export function MetricsPanel({ metrics, policyDecision = 'accept' }: MetricsPane
                   transition={{ duration: 0.5 }}
                 />
               </motion.div>
-              <p className="text-xs font-medium text-slate-700 mt-1">
+              <p className="text-xs font-medium text-slate-700 mt-1" aria-labelledby="confidence-label">
                 {(confidence * 100).toFixed(1)}%
               </p>
             </div>

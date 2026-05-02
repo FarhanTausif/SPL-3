@@ -60,15 +60,28 @@ export function AgentCard({
 }: AgentCardProps) {
   const config = statusConfig[status];
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.key === 'Enter' || e.key === ' ') && onClick) {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
   return (
     <motion.div
       className={`
         relative rounded-lg border-2 p-4 transition-all
         ${config.bg} ${config.border}
         ${status === 'running' ? 'ring-2 ring-blue-300 ring-opacity-50' : ''}
-        ${expandable ? 'cursor-pointer hover:shadow-lg' : ''}
+        ${expandable ? 'cursor-pointer hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2' : ''}
       `}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
+      role={expandable ? 'button' : undefined}
+      tabIndex={expandable ? 0 : undefined}
+      aria-label={`${name} agent - ${role} - Status: ${config.label}`}
+      aria-live="polite"
+      aria-busy={status === 'running'}
       animate={{
         scale: status === 'running' ? 1.02 : 1,
         boxShadow:

@@ -269,8 +269,16 @@ export function WorkflowDAG({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
+      role="region"
+      aria-label="Agent workflow execution pipeline"
     >
-      <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}>
+      <ReactFlow 
+        nodes={nodes} 
+        edges={edges} 
+        onNodesChange={onNodesChange} 
+        onEdgesChange={onEdgesChange}
+        aria-label="Workflow DAG visualization showing agent execution flow"
+      >
         <Background color="#a1a5ab" gap={16} />
         <Controls />
       </ReactFlow>

@@ -111,7 +111,15 @@ export default function MonitorPage() {
   const policyDecision = (currentRun?.verdict as any) || 'accept'
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-6 px-4">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-6 px-4" id="main-content">
+      {/* Skip Link */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:block absolute top-4 left-4 bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium z-50"
+      >
+        Skip to main content
+      </a>
+
       {/* Header */}
       <motion.div
         className="max-w-7xl mx-auto mb-6"
@@ -122,24 +130,25 @@ export default function MonitorPage() {
         {/* Navigation */}
         <button
           onClick={() => router.push('/')}
-          className="flex items-center gap-2 text-blue-600 hover:text-blue-800 mb-4 transition-colors"
+          aria-label="Back to home page"
+          className="flex items-center gap-2 text-blue-600 hover:text-blue-800 mb-4 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-2 py-1"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to Home
         </button>
 
         {/* Title Section */}
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
+        <div className="flex items-start justify-between mb-4 gap-4">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900">
               {isComplete ? '✅ Verification Complete' : '⏳ Verification In Progress'}
             </h1>
-            <p className="text-slate-600 mt-2">
+            <p className="text-slate-600 mt-2 text-sm sm:text-base">
               Status: <span className="font-semibold text-slate-900">{currentRun?.status || 'queued'}</span>
             </p>
           </div>
 
-          {/* Info Panel */}
+          {/* Info Panel - Desktop */}
           <motion.div
             className="hidden lg:block bg-white rounded-lg border border-slate-200 p-4 min-w-fit"
             initial={{ opacity: 0 }}
@@ -151,7 +160,8 @@ export default function MonitorPage() {
                 <p className="text-slate-600">Run ID</p>
                 <button
                   onClick={handleCopyId}
-                  className="flex items-center gap-2 font-mono text-xs bg-slate-100 px-2 py-1 rounded hover:bg-slate-200 transition-colors"
+                  aria-label={`Copy run ID: ${runId}`}
+                  className="flex items-center gap-2 font-mono text-xs bg-slate-100 px-2 py-1 rounded hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {runId.slice(0, 8)}...
                   {copiedId ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
@@ -168,6 +178,34 @@ export default function MonitorPage() {
             </div>
           </motion.div>
         </div>
+
+        {/* Info Panel - Mobile */}
+        <motion.div
+          className="lg:hidden bg-white rounded-lg border border-slate-200 p-3 grid grid-cols-3 gap-3"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+        >
+          <div>
+            <p className="text-xs text-slate-600">Run ID</p>
+            <button
+              onClick={handleCopyId}
+              aria-label={`Copy run ID: ${runId}`}
+              className="flex items-center gap-1 font-mono text-xs bg-slate-100 px-2 py-1 rounded hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
+            >
+              {runId.slice(0, 4)}...
+              {copiedId ? <CheckCircle2 className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+            </button>
+          </div>
+          <div>
+            <p className="text-xs text-slate-600">Elapsed</p>
+            <p className="font-semibold text-xs mt-1">{Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-600">Risk</p>
+            <p className="font-semibold text-xs mt-1">{(metrics.hallucination_risk_score * 100).toFixed(1)}%</p>
+          </div>
+        </motion.div>
       </motion.div>
 
       {/* Main Content */}
@@ -176,15 +214,15 @@ export default function MonitorPage() {
           <ResultsDisplay />
         ) : (
           <motion.div
-            className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 auto-rows-max lg:auto-rows-fr"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3, staggerChildren: 0.1 }}
           >
             {/* Left: Workflow DAG */}
             <motion.div
-              className="lg:col-span-2 bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden"
-              style={{ height: '600px' }}
+              className="md:col-span-2 lg:col-span-2 bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden"
+              style={{ minHeight: '400px', height: 'auto', maxHeight: '600px' }}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.3 }}
@@ -198,7 +236,8 @@ export default function MonitorPage() {
 
             {/* Right: Metrics Panel */}
             <motion.div
-              style={{ height: '600px' }}
+              className="md:col-span-2 lg:col-span-1 bg-white rounded-lg border border-slate-200 shadow-sm"
+              style={{ minHeight: '400px', height: 'auto', maxHeight: '600px' }}
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.3 }}
@@ -208,8 +247,8 @@ export default function MonitorPage() {
 
             {/* Bottom: Evidence Panel */}
             <motion.div
-              className="lg:col-span-3"
-              style={{ height: '400px' }}
+              className="col-span-1 md:col-span-2 lg:col-span-3 bg-white rounded-lg border border-slate-200 shadow-sm"
+              style={{ minHeight: '300px', height: 'auto', maxHeight: '500px' }}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.1 }}
@@ -228,37 +267,6 @@ export default function MonitorPage() {
           </motion.div>
         )}
       </div>
-
-      {/* Mobile Info */}
-      {!isComplete && (
-        <motion.div
-          className="lg:hidden max-w-7xl mx-auto mt-6 bg-white rounded-lg border border-slate-200 p-4"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-        >
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-xs text-slate-600">Elapsed</p>
-              <p className="font-semibold text-slate-900">
-                {Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-600">Risk</p>
-              <p className="font-semibold text-slate-900">
-                {(metrics.hallucination_risk_score * 100).toFixed(0)}%
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-600">Confidence</p>
-              <p className="font-semibold text-slate-900">
-                {(metrics.confidence * 100).toFixed(0)}%
-              </p>
-            </div>
-          </div>
-        </motion.div>
-      )}
     </main>
   )
 }

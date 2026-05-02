@@ -10,6 +10,31 @@ body {
   @apply bg-gradient-to-br from-slate-50 to-slate-100;
 }
 
+/* Accessibility utilities */
+@layer utilities {
+  /* Screen reader only - visually hidden but accessible */
+  .sr-only {
+    @apply absolute w-1 h-1 p-0 -m-1 overflow-hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* Focus visible for screen reader only items */
+  .focus\:not-sr-only:focus {
+    @apply relative w-auto h-auto p-0 m-0 overflow-visible;
+    clip: auto;
+    white-space: normal;
+  }
+
+  /* Reduced motion preference */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      @apply !transition-none !animate-none;
+    }
+  }
+}
+
 /* Glassmorphism effect */
 .glass {
   @apply bg-white/30 backdrop-blur-md border border-white/20 rounded-lg shadow-xl;
