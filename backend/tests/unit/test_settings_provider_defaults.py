@@ -6,9 +6,9 @@ from dehalu.core.settings import Settings
 def test_default_provider_auto_prefers_generation_order_live_provider() -> None:
     settings = Settings(database_url="sqlite://", default_provider="auto")
 
-    selected = settings.resolve_default_provider(["fake", "gemini", "grok"])
+    selected = settings.resolve_default_provider(["fake", "gemini", "groq"])
 
-    assert selected == "grok"
+    assert selected == "groq"
 
 
 def test_default_provider_auto_falls_back_to_fake() -> None:

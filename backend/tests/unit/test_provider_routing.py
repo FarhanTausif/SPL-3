@@ -10,7 +10,7 @@ def _settings(**overrides: object) -> Settings:
     values = {
         "database_url": "sqlite://",
         "gemini_api_key": "gemini-key",
-        "grok_api_key": "grok-key",
+        "groq_api_key": "groq-key",
         "mistral_api_key": "mistral-key",
         "cerebras_api_key": "cerebras-key",
     }
@@ -24,7 +24,7 @@ def test_provider_router_uses_static_role_matrix() -> None:
     router = ProviderRouter.from_settings(build_provider_registry(_settings()), _settings())
 
     assert router.get_clarification_provider().name == "gemini"
-    assert router.get_generation_provider().name == "grok"
+    assert router.get_generation_provider().name == "groq"
     assert [provider.name for provider in router.get_judge_providers()] == ["gemini", "mistral", "cerebras"]
     assert [provider.name for provider in router.get_cove_providers()] == ["mistral", "gemini"]
 
@@ -56,7 +56,7 @@ def test_provider_router_reports_role_readiness() -> None:
     assert readiness["cove"]["available"] == ["gemini"]
     assert readiness["cove"]["unavailable"] == ["mistral"]
     assert readiness["cove"]["selected"] == "gemini"
-    assert readiness["roles"]["generation"]["selected"] == "grok"
+    assert readiness["roles"]["generation"]["selected"] == "groq"
     assert readiness["live_provider_operation_ready"] is True
     assert readiness["routing_policy_version"] == "v1"
 
@@ -64,7 +64,7 @@ def test_provider_router_reports_role_readiness() -> None:
 def test_provider_router_uses_settings_defined_order() -> None:
     settings = _settings(
         clarification_provider_order=("mistral", "gemini"),
-        generation_provider_order=("gemini", "grok"),
+        generation_provider_order=("gemini", "groq"),
     )
     router = ProviderRouter.from_settings(build_provider_registry(settings), settings)
 
@@ -104,7 +104,7 @@ def test_provider_router_deprioritizes_failed_judge_invocations_for_repair() -> 
 
 
 def test_provider_router_falls_back_to_repair_chain_when_panel_missing() -> None:
-    settings = _settings(gemini_api_key=None, mistral_api_key=None, cerebras_api_key=None, grok_api_key="grok-key")
+    settings = _settings(gemini_api_key=None, mistral_api_key=None, cerebras_api_key=None, groq_api_key="groq-key")
     registry = build_provider_registry(settings)
     router = ProviderRouter.from_settings(registry, settings)
     generation = router.get_generation_provider()
@@ -114,6 +114,6 @@ def test_provider_router_falls_back_to_repair_chain_when_panel_missing() -> None
 
     selection = router.choose_repair_provider(judge_results=judge_results, generation_provider=generation)
 
-    assert selection.provider_name == "grok"
+    assert selection.provider_name == "groq"
     assert selection.fallback_used is True
     assert selection.selected_via == "repair_chain"

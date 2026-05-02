@@ -43,7 +43,7 @@ def build_provider_registry(
     settings: Settings | None = None,
     *,
     gemini_http_client: httpx.Client | None = None,
-    grok_http_client: httpx.Client | None = None,
+    groq_http_client: httpx.Client | None = None,
     mistral_http_client: httpx.Client | None = None,
     cerebras_http_client: httpx.Client | None = None,
 ) -> ProviderRegistry:
@@ -51,17 +51,17 @@ def build_provider_registry(
     providers: list[LLMProvider] = [FakeLLMProvider()]
     if settings.gemini_enabled:
         providers.append(GeminiLLMProvider(settings, http_client=gemini_http_client))
-    if settings.grok_enabled:
+    if settings.groq_enabled:
         providers.append(
             OpenAICompatibleLLMProvider(
-                name="grok",
-                api_key=settings.grok_api_key,
-                base_url=settings.grok_base_url,
-                generate_model=settings.grok_generate_model,
-                verify_model=settings.grok_verify_model,
-                timeout_seconds=settings.grok_timeout_seconds,
-                http_client=grok_http_client,
-                retry_attempts=settings.grok_retry_attempts,
+                name="groq",
+                api_key=settings.groq_api_key,
+                base_url=settings.groq_base_url,
+                generate_model=settings.groq_generate_model,
+                verify_model=settings.groq_verify_model,
+                timeout_seconds=settings.groq_timeout_seconds,
+                http_client=groq_http_client,
+                retry_attempts=settings.groq_retry_attempts,
                 prompt_policy_version=settings.prompt_policy_version,
                 routing_policy_version=settings.routing_policy_version,
                 capture_full_payloads=settings.provider_capture_full_payloads,

@@ -4,7 +4,7 @@
 
 DeHalu is a language-agnostic hallucination detection and mitigation system for CodeLLMs. Its purpose is to sit between a single code-producing model and the final user response, detect hallucinated code artifacts before release, and trigger correction only when the detection layer finds meaningful risk.
 
-The system is intentionally lightweight. It does not rely on GPU training, fine-tuning, or mandatory RAG. Instead, it combines `CrewAI`-orchestrated multi-agent verification with deterministic parsing and validation using `Tree-sitter`, bounded execution checks, and structured audit logging. The result is a maintainable, provider-agnostic architecture that can work with Gemini, Grok, Mistral, Cerebras, or a local coder model while remaining ready for future context integration.
+The system is intentionally lightweight. It does not rely on GPU training, fine-tuning, or mandatory RAG. Instead, it combines `CrewAI`-orchestrated multi-agent verification with deterministic parsing and validation using `Tree-sitter`, bounded execution checks, and structured audit logging. The result is a maintainable, provider-agnostic architecture that can work with Gemini, Groq, Mistral, Cerebras, or a local coder model while remaining ready for future context integration.
 
 Current implementation is backend-first. `backend/src/dehalu/` is the authoritative runtime for orchestration, verification, mitigation triggers, tool access, and state. A frontend boundary can be added later, but mitigation architecture and run lifecycle are currently owned by backend modules.
 
@@ -269,7 +269,7 @@ Every model provider should implement a common interface, for example:
 Supported provider families:
 
 - Gemini
-- Grok
+- Groq
 - Mistral
 - Cerebras
 - local model adapters such as Ollama

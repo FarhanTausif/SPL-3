@@ -23,7 +23,7 @@ from dehalu.schemas import (
 
 
 def _settings(**overrides: object) -> Settings:
-    return Settings(database_url="sqlite://", grok_api_key="grok-key", **overrides)
+    return Settings(database_url="sqlite://", groq_api_key="groq-key", **overrides)
 
 
 def _request() -> NormalizedRequest:
@@ -32,7 +32,7 @@ def _request() -> NormalizedRequest:
         language="python",
         risk_level=RiskLevel.medium,
         latency_budget_seconds=15,
-        provider="grok",
+        provider="groq",
     )
 
 
@@ -53,7 +53,7 @@ def test_build_provider_registry_adds_openai_compatible_providers() -> None:
     enabled = build_provider_registry(
         Settings(
             database_url="sqlite://",
-            grok_api_key="grok-key",
+            groq_api_key="groq-key",
             mistral_api_key="mistral-key",
             cerebras_api_key="cerebras-key",
         )
@@ -61,7 +61,7 @@ def test_build_provider_registry_adds_openai_compatible_providers() -> None:
 
     assert enabled.health() == {
         "fake": True,
-        "grok": True,
+        "groq": True,
         "mistral": True,
         "cerebras": True,
     }
@@ -126,11 +126,11 @@ def test_openai_compat_provider_clarify_generate_judge_cove_and_repair() -> None
     )
     client = httpx.Client(transport=httpx.MockTransport(lambda request: next(responses)))
     provider = OpenAICompatibleLLMProvider(
-        name="grok",
-        api_key="grok-key",
+        name="groq",
+        api_key="groq-key",
         base_url="https://api.x.ai/v1",
-        generate_model="grok-code-fast-1",
-        verify_model="grok-beta",
+        generate_model="groq-code-fast-1",
+        verify_model="groq-beta",
         timeout_seconds=15.0,
         http_client=client,
     )
@@ -142,7 +142,7 @@ def test_openai_compat_provider_clarify_generate_judge_cove_and_repair() -> None
     cove_result = provider.cove(request, output, [ExtractedClaim(kind="code", value="print('ok')", source="code")], [], _sandbox_result(), judge_result)
     repaired = provider.repair(
         request,
-        CoderOutput(provider="grok", model="grok-code-fast-1", language="python", code="print(eval(user_input))\n"),
+        CoderOutput(provider="groq", model="groq-code-fast-1", language="python", code="print(eval(user_input))\n"),
         PolicyDecision(
             state=PolicyDecisionState.repair_and_retry,
             reasons=["Repair this."],
@@ -152,15 +152,15 @@ def test_openai_compat_provider_clarify_generate_judge_cove_and_repair() -> None
         ),
         JudgeResult(
             verdict=JudgeVerdict.fail,
-            provider="grok",
-            model="grok-beta",
+            provider="groq",
+            model="groq-beta",
             duration_ms=1.0,
             hallucination_score=0.8,
         ),
         CoVeResult(
             verdict=CoVeVerdict.fail,
-            provider="grok",
-            model="grok-beta",
+            provider="groq",
+            model="groq-beta",
             duration_ms=1.0,
             hallucination_score=0.8,
         ),
@@ -185,11 +185,11 @@ def test_openai_compat_provider_retries_rate_limit_once() -> None:
     )
     client = httpx.Client(transport=httpx.MockTransport(lambda request: next(responses)))
     provider = OpenAICompatibleLLMProvider(
-        name="grok",
-        api_key="grok-key",
+        name="groq",
+        api_key="groq-key",
         base_url="https://api.x.ai/v1",
-        generate_model="grok-code-fast-1",
-        verify_model="grok-beta",
+        generate_model="groq-code-fast-1",
+        verify_model="groq-beta",
         timeout_seconds=15.0,
         http_client=client,
         retry_attempts=1,

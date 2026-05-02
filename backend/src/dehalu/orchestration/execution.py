@@ -8,6 +8,7 @@ from dehalu.adapters.llm import LLMProvider
 from dehalu.agents import CrewAIRunner, CrewExecutionContext, CrewTaskSpec, OrchestrationTraceEntry
 from dehalu.agents.roles import (
     CLAIM_EXTRACTOR_AGENT,
+    CLARIFICATION_AGENT,
     COVE_AGENT,
     GENERATOR_AGENT,
     JUDGE_AGENT,
@@ -373,12 +374,60 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
         )
 
     def _build_task_specs(self) -> list[CrewTaskSpec]:
+        """
+        Build the CrewAI task specifications for the full verification pipeline.
+
+        Task flow:
+        1. clarify_request (optional) - Sharpen ambiguous requests before generation
+        2. generate_output - Produce initial code draft
+        3. extract_claims - Extract verifiable claims from code
+        4. static_analysis - Run deterministic syntax/AST/import checks
+        5. sandbox_verify - Run bounded execution probes
+        6. judge_output - Score hallucination risk via LLM-as-a-Judge
+        7. cove_output - Chain-of-Verification for claim-level checks
+        8. policy_decide - Fuse evidence into policy decision
+        9. repair_output (conditional) - Fix detected hallucinations
+        10-14. repair_* tasks - Re-verify repaired code
+        15. repair_policy_decide - Final policy decision
+        """
         return [
+            CrewTaskSpec(
+                name="clarify_request",
+                stage="clarify",
+                description=(
+                    "Analyze the incoming coding request and identify any ambiguous or missing "
+                    "constraints before generation. Transform the raw prompt into a normalized task "
+                    "specification with explicit language, framework, runtime, and acceptance criteria. "
+                    "Flag underspecified requests that require user clarification rather than proceeding "
+                    "with assumptions."
+                ),
+                expected_output=(
+                    "A normalized request object with all constraints made explicit, or a clarification "
+                    "response indicating what information is missing from the user."
+                ),
+                agent_role=CLARIFICATION_AGENT["role"],
+                output_key=None,  # Clarification modifies the request in-place
+                audit_label="clarification",
+                # Clarification runs before generation in worker-backed mode only
+                should_run=lambda ctx: (False, "clarification_disabled_for_crewai" if ctx.orchestration_mode == "crewai" else "worker_mode_not_implemented"),
+                run=lambda ctx: None,  # Placeholder - clarification handled in service.py
+            ),
             CrewTaskSpec(
                 name="generate_output",
                 stage="generate",
-                description="Generate the initial coder output for verification.",
-                expected_output="A coder output object ready for verification.",
+                description=(
+                    "Generate a single code implementation that addresses the normalized task "
+                    "specification. The output must include: (1) complete source code, (2) a list "
+                    "of dependencies and imports, (3) explicit assumptions about the runtime "
+                    "environment, and (4) notes on any edge cases or limitations. This code will "
+                    "undergo rigorous verification, so completeness and correctness are prioritized "
+                    "over speed."
+                ),
+                expected_output=(
+                    "A CoderOutput object containing: code (str), dependencies (list), assumptions "
+                    "(list), files_touched (list), and execution_notes (str). The code must be "
+                    "syntactically valid and aligned with the requested language and framework."
+                ),
                 agent_role=GENERATOR_AGENT["role"],
                 output_key=ORIGINAL_GENERATED_OUTPUT,
                 audit_label="original_generation",
@@ -387,8 +436,18 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="extract_claims",
                 stage="extract_claims",
-                description="Extract structured claims from the generated output.",
-                expected_output="A structured list of extracted claims.",
+                description=(
+                    "Parse the generated code and extract all verifiable claims that require "
+                    "downstream validation. Claims include: (1) package dependencies and imports, "
+                    "(2) API/symbol references (classes, functions, methods), (3) runtime or "
+                    "environment assumptions, (4) behavioral promises (what the code claims to do), "
+                    "and (5) side effects or external interactions. Each claim becomes a verification "
+                    "target for the judge, CoVe, and static analysis stages."
+                ),
+                expected_output=(
+                    "A list of ExtractedClaim objects, each with: claim_type (dependency/api/assumption/behavior), "
+                    "claim_text (the specific claim), confidence (0-1), and evidence_location (line numbers)."
+                ),
                 agent_role=CLAIM_EXTRACTOR_AGENT["role"],
                 output_key=ORIGINAL_EXTRACTED_CLAIMS,
                 depends_on=(ORIGINAL_GENERATED_OUTPUT,),
@@ -401,8 +460,19 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="static_analysis",
                 stage="static_analysis",
-                description="Run deterministic syntax and static checks.",
-                expected_output="Static findings produced from the generated code.",
+                description=(
+                    "Apply deterministic static analysis checks using Tree-sitter and language-specific "
+                    "adapters. Verify: (1) syntax validity via AST parsing, (2) import resolution "
+                    "(detect non-existent packages), (3) symbol validation (undefined variables/functions), "
+                    "(4) unsafe pattern detection (eval, exec, shell injection risks), and (5) language-specific "
+                    "linting rules. Static analysis provides hard-fail signals that override prompt-based "
+                    "confidence."
+                ),
+                expected_output=(
+                    "A list of StaticFinding objects, each with: finding_type (syntax/import/symbol/safety), "
+                    "severity (error/warning/info), message (human-readable description), line_number, "
+                    "and code_snippet. Empty list means all static checks passed."
+                ),
                 agent_role=STATIC_VERIFIER_AGENT["role"],
                 output_key=ORIGINAL_STATIC_FINDINGS,
                 depends_on=(ORIGINAL_GENERATED_OUTPUT,),
@@ -415,8 +485,18 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="sandbox_verify",
                 stage="sandbox_verify",
-                description="Run bounded sandbox validation on the generated code.",
-                expected_output="A sandbox verification result.",
+                description=(
+                    "Execute bounded runtime probes on the generated code in an isolated sandbox. "
+                    "Checks include: (1) compilation/parse check, (2) smoke-run execution, (3) generated "
+                    "assertion probes, and (4) metamorphic tests for invariant-preserving transformations. "
+                    "The sandbox enforces strict resource limits: CPU, memory, timeout, filesystem, and "
+                    "network isolation. Execution failure is a stronger signal than prompt confidence."
+                ),
+                expected_output=(
+                    "A SandboxResult object with: executed (bool), exit_code (int), stdout/stderr (str), "
+                    "duration_ms (float), resource_limits (dict), and any exception details. A successful "
+                    "execution does not guarantee correctness, but failure strongly indicates hallucination."
+                ),
                 agent_role=STATIC_VERIFIER_AGENT["role"],
                 output_key=ORIGINAL_SANDBOX_RESULT,
                 depends_on=(ORIGINAL_GENERATED_OUTPUT,),
@@ -429,8 +509,20 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="judge_output",
                 stage="judge",
-                description="Score hallucination risk using the judge stage.",
-                expected_output="A judge result with hallucination findings.",
+                description=(
+                    "Evaluate hallucination risk using LLM-as-a-Judge methodology. Score the generated "
+                    "code against multiple metrics: (1) requirement_alignment_score - does it solve the "
+                    "requested task, (2) claim_consistency_score - do the claims match the code, "
+                    "(3) dependency_plausibility_score - are packages/imports real and appropriate, "
+                    "(4) api_symbol_validity_score - are referenced APIs real, (5) unsupported_assumption_score "
+                    "- what claims lack evidence. The judge receives all deterministic findings and must "
+                    "produce a structured verdict, not free-form critique."
+                ),
+                expected_output=(
+                    "A JudgeResult object with: hallucination_likelihood (0-1), metric_scores (dict of "
+                    "individual scores), hard_fail_flags (list of critical issues), claim_level_findings "
+                    "(list of per-claim verdicts), and overall_verdict (accept/warn/reject with explanation)."
+                ),
                 agent_role=JUDGE_AGENT["role"],
                 output_key=ORIGINAL_JUDGE_RESULT,
                 depends_on=(
@@ -448,8 +540,20 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="cove_output",
                 stage="cove",
-                description="Re-check extracted claims with the CoVe stage.",
-                expected_output="A CoVe result with claim support findings.",
+                description=(
+                    "Perform Chain-of-Verification (CoVe) by independently re-checking each extracted "
+                    "claim against the generated code. For each claim: (1) locate the relevant code "
+                    "region, (2) verify the claim is actually supported by the code, (3) flag any "
+                    "contradictions between the claim and the code behavior, and (4) mark claims as "
+                    "supported/unsupported/uncertain. CoVe provides claim-level granularity that "
+                    "complements the judge's holistic assessment."
+                ),
+                expected_output=(
+                    "A CoVeResult object with: claim_checks (list of per-claim verdicts with support "
+                    "status and evidence), unsupported_claims_summary (list of flagged claims), "
+                    "uncertainty_flags (list of claims that couldn't be verified), and overall_consistency "
+                    "score (0-1)."
+                ),
                 agent_role=COVE_AGENT["role"],
                 output_key=ORIGINAL_COVE_RESULT,
                 depends_on=(
@@ -468,8 +572,19 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="policy_decide",
                 stage="policy_decide",
-                description="Fuse verification evidence into the first policy decision.",
-                expected_output="An initial evaluation bundle with policy decision.",
+                description=(
+                    "Fuse all verification evidence into a final policy decision. The policy engine "
+                    "aggregates: (1) static analysis findings (hard-fail errors), (2) sandbox execution "
+                    "results (runtime failures), (3) judge hallucination scores, (4) CoVe claim-level "
+                    "verdicts, and (5) task risk level. Based on fused evidence, return one of: "
+                    "'accept' (release code), 'warn_and_return_partial' (release with caveats), "
+                    "'repair_and_retry' (trigger Fixer Agent), or 'reject' (fail closed with evidence)."
+                ),
+                expected_output=(
+                    "A PolicyDecision object with: state (accept/warn_and_return_partial/repair_and_retry/reject), "
+                    "metrics (dict of all scores that influenced the decision), explanation (human-readable "
+                    "justification), and repair_trigger (reason if repair was triggered)."
+                ),
                 agent_role=POLICY_COORDINATOR_AGENT["role"],
                 output_key=ORIGINAL_POLICY_DECISION,
                 depends_on=(
@@ -489,8 +604,20 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="repair_output",
                 stage="repair",
-                description="Generate one repair output when policy requests mitigation.",
-                expected_output="A repaired coder output ready for re-verification.",
+                description=(
+                    "Repair the generated code when the policy engine detects hallucination and triggers "
+                    "repair-and-retry. The Repair Agent receives: (1) original code, (2) policy decision "
+                    "with specific failure reasons, (3) judge findings (flagged hallucinations), "
+                    "(4) CoVe report (unsupported claims), and (5) static/sandbox failures. The repair "
+                    "must address flagged issues while preserving original intent. May use MCP-backed "
+                    "tools for documentation lookup, symbol validation, or dependency resolution."
+                ),
+                expected_output=(
+                    "A CoderOutput object containing repaired code that addresses all flagged hallucinations. "
+                    "The output includes the same structure as the original generation: code, dependencies, "
+                    "assumptions, and execution notes. A RepairAttempt record is created to track what "
+                    "changed and why."
+                ),
                 agent_role=REPAIR_AGENT["role"],
                 output_key=REPAIR_GENERATED_OUTPUT,
                 depends_on=(INITIAL_ATTEMPT,),
@@ -501,8 +628,15 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="repair_extract_claims",
                 stage="extract_claims",
-                description="Extract claims from the repaired output.",
-                expected_output="A structured list of extracted claims for the repaired output.",
+                description=(
+                    "Extract claims from the repaired code using the same extraction logic as the "
+                    "original pass. This ensures the repaired code's claims are verified downstream. "
+                    "Compare extracted claims against the original to detect if repair introduced "
+                    "new assumptions or dependencies."
+                ),
+                expected_output=(
+                    "A list of ExtractedClaim objects for the repaired code, ready for verification."
+                ),
                 agent_role=CLAIM_EXTRACTOR_AGENT["role"],
                 output_key=REPAIR_EXTRACTED_CLAIMS,
                 depends_on=(REPAIR_GENERATED_OUTPUT,),
@@ -516,8 +650,16 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="repair_static_analysis",
                 stage="static_analysis",
-                description="Run deterministic syntax and static checks on the repaired output.",
-                expected_output="Static findings produced from the repaired code.",
+                description=(
+                    "Run static analysis on the repaired code to verify that repairs didn't introduce "
+                    "new syntax errors, invalid imports, or undefined symbols. The same deterministic "
+                    "checks apply: syntax validity, import resolution, symbol validation, and safety "
+                    "pattern detection."
+                ),
+                expected_output=(
+                    "A list of StaticFinding objects for the repaired code. Empty list means all "
+                    "static checks passed."
+                ),
                 agent_role=STATIC_VERIFIER_AGENT["role"],
                 output_key=REPAIR_STATIC_FINDINGS,
                 depends_on=(REPAIR_GENERATED_OUTPUT,),
@@ -531,8 +673,14 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="repair_sandbox_verify",
                 stage="sandbox_verify",
-                description="Run bounded sandbox validation on the repaired code.",
-                expected_output="A sandbox verification result for the repaired output.",
+                description=(
+                    "Execute bounded runtime probes on the repaired code. Verify that the repair "
+                    "didn't break execution and that previously failing tests now pass. Same sandbox "
+                    "constraints apply: CPU, memory, timeout, filesystem, and network isolation."
+                ),
+                expected_output=(
+                    "A SandboxResult object for the repaired code showing execution success or failure."
+                ),
                 agent_role=STATIC_VERIFIER_AGENT["role"],
                 output_key=REPAIR_SANDBOX_RESULT,
                 depends_on=(REPAIR_GENERATED_OUTPUT,),
@@ -546,8 +694,16 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="repair_judge_output",
                 stage="judge",
-                description="Score hallucination risk for the repaired output.",
-                expected_output="A judge result for the repaired output.",
+                description=(
+                    "Re-evaluate hallucination risk for the repaired code. The judge assesses whether "
+                    "the repair successfully addressed the flagged issues without introducing new "
+                    "hallucinations. Same metrics apply: requirement alignment, claim consistency, "
+                    "dependency plausibility, API validity, and unsupported assumptions."
+                ),
+                expected_output=(
+                    "A JudgeResult object for the repaired code with updated hallucination scores "
+                    "and verdict."
+                ),
                 agent_role=JUDGE_AGENT["role"],
                 output_key=REPAIR_JUDGE_RESULT,
                 depends_on=(
@@ -566,8 +722,15 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="repair_cove_output",
                 stage="cove",
-                description="Re-check repaired claims with the CoVe stage.",
-                expected_output="A CoVe result for the repaired output.",
+                description=(
+                    "Re-check claims from the repaired code using Chain-of-Verification. Verify that "
+                    "previously unsupported claims are now supported and that no new unsupported "
+                    "claims were introduced. The CoVe pass on repaired code is critical for ensuring "
+                    "repair quality."
+                ),
+                expected_output=(
+                    "A CoVeResult object for the repaired code showing claim-level support status."
+                ),
                 agent_role=COVE_AGENT["role"],
                 output_key=REPAIR_COVE_RESULT,
                 depends_on=(
@@ -587,8 +750,17 @@ class CrewAIExecutionEngine(_BaseExecutionEngine):
             CrewTaskSpec(
                 name="repair_policy_decide",
                 stage="policy_decide",
-                description="Fuse verification evidence into the final policy decision.",
-                expected_output="A final evaluation bundle and policy decision.",
+                description=(
+                    "Make the final policy decision on the repaired code. This is the last chance "
+                    "to catch hallucinations before release. The policy engine fuses all re-verification "
+                    "evidence and returns: 'accept' (release repaired code), 'warn_and_return_partial' "
+                    "(release with caveats), or 'reject' (fail closed with full evidence). Note: "
+                    "allow_repair=False, so even if issues persist, no further repair is attempted."
+                ),
+                expected_output=(
+                    "A PolicyDecision object with the final release decision. This decision is "
+                    "terminal for the run."
+                ),
                 agent_role=POLICY_COORDINATOR_AGENT["role"],
                 output_key=REPAIR_POLICY_DECISION,
                 depends_on=(

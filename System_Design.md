@@ -4,7 +4,7 @@
 
 This system is a lightweight, runtime-first verification gateway for CodeLLMs. Its objective is to reduce hallucinated code, APIs, dependencies, and implementation claims without training, fine-tuning, or heavy RAG infrastructure.
 
-The MVP uses prompt engineering, multi-agent verification, static analysis, and constrained execution to validate generated code before release. It is designed to work with cloud-hosted models through `crewAI`, remain provider-agnostic across Gemini, Grok, Mistral, and Cerebras, and stay modular enough to accept future context modules such as MCP tools or RAG without architectural rework.
+The MVP uses prompt engineering, multi-agent verification, static analysis, and constrained execution to validate generated code before release. It is designed to work with cloud-hosted models through `crewAI`, remain provider-agnostic across Gemini, Groq, Mistral, and Cerebras, and stay modular enough to accept future context modules such as MCP tools or RAG without architectural rework.
 
 Primary evidence from the current graph:
 
@@ -673,7 +673,7 @@ The MVP should be evaluated on:
 ## Current Defaults
 
 - Orchestration layer: `crewAI`
-- Providers: Gemini, Grok, Mistral, Cerebras via provider adapters
+- Providers: Gemini, Groq, Mistral, Cerebras via provider adapters
 - Operating mode: online verification gateway
 - Latency target: `5-15s`
 - Coder count: `1`

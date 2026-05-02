@@ -6,6 +6,7 @@ from dehalu.agents.compat import Agent, HAS_CREWAI, Task
 from dehalu.agents.contracts import CrewExecutionContext, CrewTaskSpec
 from dehalu.agents.roles import (
     CLAIM_EXTRACTOR_AGENT,
+    CLARIFICATION_AGENT,
     COVE_AGENT,
     GENERATOR_AGENT,
     JUDGE_AGENT,
@@ -16,6 +17,7 @@ from dehalu.agents.roles import (
 
 
 ROLE_DEFINITIONS = {
+    CLARIFICATION_AGENT["role"]: CLARIFICATION_AGENT,
     GENERATOR_AGENT["role"]: GENERATOR_AGENT,
     CLAIM_EXTRACTOR_AGENT["role"]: CLAIM_EXTRACTOR_AGENT,
     STATIC_VERIFIER_AGENT["role"]: STATIC_VERIFIER_AGENT,

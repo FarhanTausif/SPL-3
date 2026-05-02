@@ -39,7 +39,7 @@ At least one live provider key must be set for live routing:
 
 ```bash
 DEHALU_GEMINI_API_KEY=...
-DEHALU_GROK_API_KEY=...
+DEHALU_GROQ_API_KEY=...
 DEHALU_MISTRAL_API_KEY=...
 DEHALU_CEREBRAS_API_KEY=...
 ```
@@ -106,6 +106,12 @@ python scripts/run_live_evaluation.py \
   --cases tests/evaluation/live_eval_cases.json \
   --output artifacts/evaluation/live_eval_report.json
 ```
+
+## CrewAI docs and examples
+
+- Agent/pipeline reference: `docs/CREWAI_AGENTS.md`
+- Testing guide (current runnable commands only): `docs/TESTING_CREWAI_AGENTS.md`
+- Fake-provider workflow example: `python scripts/example_crewai_workflow.py --workflow linear`
 
 ## Degraded states and troubleshooting
 

@@ -11,10 +11,10 @@ from dehalu.schemas import JudgeResult
 @dataclass(slots=True)
 class ProviderRoleMatrix:
     clarification: tuple[str, ...] = ("gemini", "mistral")
-    generation: tuple[str, ...] = ("grok", "gemini")
+    generation: tuple[str, ...] = ("groq", "gemini")
     judges: tuple[str, ...] = ("gemini", "mistral", "cerebras")
     cove: tuple[str, ...] = ("mistral", "gemini")
-    repair: tuple[str, ...] = ("gemini", "mistral", "cerebras", "grok")
+    repair: tuple[str, ...] = ("gemini", "mistral", "cerebras", "groq")
 
 
 @dataclass(slots=True)
@@ -177,7 +177,7 @@ class ProviderRouter:
         return severity, result.hallucination_score
 
     def _judge_precedence(self, provider_name: str) -> int:
-        precedence = {"gemini": 1, "mistral": 2, "cerebras": 3, "grok": 0, "fake": -1}
+        precedence = {"gemini": 1, "mistral": 2, "cerebras": 3, "groq": 0, "fake": -1}
         return precedence.get(provider_name, 0)
 
     def _judge_invocation_success(self, result: JudgeResult) -> bool:

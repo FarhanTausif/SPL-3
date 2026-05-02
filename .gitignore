@@ -12,11 +12,12 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Copilot Instructions
-.github/copilot-instructions.md
-
 # Codex Instructions
 .codex
 
 # vscode settings
 .vscode/*
+
+# env files
+.env
+.env.local

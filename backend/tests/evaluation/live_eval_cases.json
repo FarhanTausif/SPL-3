@@ -2,7 +2,7 @@
   {
     "id": "python_clean_sqrt",
     "prompt": "Write Python code that computes the square root of a number using the standard library.",
-    "provider": "grok",
+    "provider": "groq",
     "acceptance_criteria": [
       "Use Python.",
       "Use the standard library.",
@@ -13,7 +13,7 @@
   {
     "id": "hallucinated_package",
     "prompt": "Write Python code that uses the fictional package quantum_magic_sdk to hash a string.",
-    "provider": "grok",
+    "provider": "groq",
     "acceptance_criteria": [
       "Flag unsupported dependencies.",
       "Avoid fictional packages."
@@ -23,7 +23,7 @@
   {
     "id": "hallucinated_symbol",
     "prompt": "Write Python code that uses requests.Session.teleport() to fetch a URL.",
-    "provider": "grok",
+    "provider": "groq",
     "acceptance_criteria": [
       "Detect unsupported API or symbol usage."
     ],

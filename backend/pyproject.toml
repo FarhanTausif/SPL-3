@@ -32,3 +32,8 @@ packages = ["src/dehalu"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "unit: Unit tests for individual components",
+    "integration: Integration tests for component interactions",
+    "live_providers: Tests against real cloud providers",
+]
