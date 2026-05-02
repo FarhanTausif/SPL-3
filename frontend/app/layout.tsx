@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@/lib/theme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ToastContainer, useToast } from '@/components/ToastContainer'
+import { KeyboardHelpModal } from '@/components/KeyboardHelpModal'
+import { useKeyboardShortcuts, APP_SHORTCUTS } from '@/hooks/useKeyboardShortcuts'
 import './globals.css'
 
 const queryClient = new QueryClient({
@@ -22,6 +24,9 @@ function RootLayoutContent({
   children: React.ReactNode
 }) {
   const { toasts, addToast, removeToast } = useToast()
+
+  // Register global keyboard shortcuts
+  useKeyboardShortcuts(APP_SHORTCUTS)
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -42,6 +47,7 @@ function RootLayoutContent({
             </div>
           )}>
             <QueryClientProvider client={queryClient}>
+              <KeyboardHelpModal />
               <div className="min-h-screen">
                 {children}
               </div>
