@@ -4,10 +4,12 @@ import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useRunStore } from '@/stores/runStore'
 import { useRunStatus } from '@/hooks/useRunStatus'
+import { useRunUpdates } from '@/hooks/useRunUpdates'
 import { WorkflowDAG, EvidencePanel, MetricsPanel } from '@/components/workflow'
 import { ResultsDisplay } from '@/components/ResultsDisplay'
-import { ArrowLeft, Copy, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Copy, CheckCircle2, Zap } from 'lucide-react'
 import { motion } from 'framer-motion'
+import { useHistoryStore } from '@/stores/historyStore'
 
 export default function MonitorPage() {
   const params = useParams()
@@ -17,6 +19,23 @@ export default function MonitorPage() {
   const currentRun = useRunStore((state) => state.currentRun)
   const [copiedId, setCopiedId] = useState(false)
   const [elapsedTime, setElapsedTime] = useState(0)
+  const [wsConnected, setWsConnected] = useState(false)
+  const addToHistory = useHistoryStore((state) => state.addToHistory)
+
+  // Use WebSocket for real-time updates
+  const { isWSConnected } = useRunUpdates(
+    runId,
+    (status) => {
+      console.log('[Monitor] Status update:', status)
+    },
+    (agentName, agentStatus) => {
+      console.log('[Monitor] Agent update:', agentName, agentStatus)
+    }
+  )
+
+  useEffect(() => {
+    setWsConnected(isWSConnected)
+  }, [isWSConnected])
 
   const isComplete = currentRun && (currentRun.status === 'completed' || currentRun.status === 'failed')
 
@@ -27,6 +46,23 @@ export default function MonitorPage() {
     }, 1000)
     return () => clearInterval(interval)
   }, [])
+
+  // Add to history on completion
+  useEffect(() => {
+    if (isComplete && currentRun) {
+      addToHistory({
+        runId,
+        prompt: currentRun.user_prompt || '',
+        language: 'unknown',
+        status: (currentRun.status as any) || 'completed',
+        halluckinationScore: 1 - (currentRun.confidence || 0.5),
+        verdict: (currentRun.verdict as any) || null,
+        createdAt: Date.now(),
+        duration: elapsedTime,
+        generatedCode: currentRun.generated_code || '',
+      })
+    }
+  }, [isComplete, elapsedTime])
 
   const handleCopyId = () => {
     navigator.clipboard.writeText(runId)
@@ -140,11 +176,24 @@ export default function MonitorPage() {
         {/* Title Section */}
         <div className="flex items-start justify-between mb-4 gap-4">
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900">
-              {isComplete ? '✅ Verification Complete' : '⏳ Verification In Progress'}
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900">
+                {isComplete ? '✅ Verification Complete' : '⏳ Verification In Progress'}
+              </h1>
+              {wsConnected && (
+                <motion.div
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className="flex items-center gap-1 text-green-600 text-sm font-medium"
+                >
+                  <Zap className="w-4 h-4" />
+                  Live
+                </motion.div>
+              )}
+            </div>
             <p className="text-slate-600 mt-2 text-sm sm:text-base">
               Status: <span className="font-semibold text-slate-900">{currentRun?.status || 'queued'}</span>
+              {!wsConnected && <span className="text-orange-600 ml-2">(Polling)</span>}
             </p>
           </div>
 
