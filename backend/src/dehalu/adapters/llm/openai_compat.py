@@ -558,11 +558,17 @@ class OpenAICompatibleLLMProvider:
 
     def _strip_code_fences(self, text: str) -> str:
         stripped = text.strip()
-        if not stripped.startswith("```"):
+        if "```" not in stripped:
             return stripped
         lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        return "\n".join(lines).strip()
+        in_fence = False
+        fenced: list[str] = []
+        for line in lines:
+            if line.strip().startswith("```"):
+                if in_fence:
+                    break
+                in_fence = True
+                continue
+            if in_fence:
+                fenced.append(line)
+        return "\n".join(fenced).strip() or stripped.replace("```", "").strip()

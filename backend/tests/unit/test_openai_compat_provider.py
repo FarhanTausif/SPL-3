@@ -26,6 +26,21 @@ def _settings(**overrides: object) -> Settings:
     return Settings(database_url="sqlite://", groq_api_key="groq-key", **overrides)
 
 
+def test_openai_compat_extracts_first_fenced_code_block_only() -> None:
+    provider = OpenAICompatibleLLMProvider(
+        name="groq",
+        api_key="test",
+        base_url="https://example.test",
+        generate_model="gen",
+        verify_model="verify",
+        timeout_seconds=1.0,
+    )
+
+    text = "```python\nprint('ok')\n```\n\nThis explanation is not source code."
+
+    assert provider._strip_code_fences(text) == "print('ok')"
+
+
 def _request() -> NormalizedRequest:
     return NormalizedRequest(
         prompt="Write Python code.",
@@ -53,6 +68,7 @@ def test_build_provider_registry_adds_openai_compatible_providers() -> None:
     enabled = build_provider_registry(
         Settings(
             database_url="sqlite://",
+            gemini_api_key=None,
             groq_api_key="groq-key",
             mistral_api_key="mistral-key",
             cerebras_api_key="cerebras-key",

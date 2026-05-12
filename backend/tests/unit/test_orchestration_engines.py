@@ -28,11 +28,11 @@ def _components() -> tuple[ClaimExtractor, StaticAnalyzer, SandboxVerifier, Poli
     )
 
 
-def test_orchestration_mode_defaults_to_direct() -> None:
+def test_orchestration_mode_defaults_to_crewai() -> None:
     settings = Settings(database_url="sqlite://", default_provider="fake", gemini_api_key=None)
     orchestrator = RunOrchestrator(settings, build_provider_registry(settings))
 
-    assert isinstance(orchestrator.execution_engine, DirectExecutionEngine)
+    assert isinstance(orchestrator.execution_engine, CrewAIExecutionEngine)
 
 
 def test_orchestration_mode_can_switch_to_crewai() -> None:
@@ -156,11 +156,13 @@ def test_direct_and_crewai_preserve_deterministic_precedence() -> None:
     direct_result = direct.execute(normalized, provider)
     crewai_result = crewai.execute(normalized, provider)
 
-    assert direct_result.final_attempt.policy_decision.state == PolicyDecisionState.reject
-    assert crewai_result.final_attempt.policy_decision.state == PolicyDecisionState.reject
-    assert direct_result.repair_result.outcome.value == "skipped"
-    assert crewai_result.repair_result.outcome.value == "skipped"
-    assert any(entry.task_name == "repair_output" and entry.status == "skipped" for entry in crewai_result.orchestration_trace)
+    assert direct_result.initial_attempt.policy_decision.state == PolicyDecisionState.repair_and_retry
+    assert crewai_result.initial_attempt.policy_decision.state == PolicyDecisionState.repair_and_retry
+    assert direct_result.final_attempt.policy_decision.state == PolicyDecisionState.accept
+    assert crewai_result.final_attempt.policy_decision.state == PolicyDecisionState.accept
+    assert direct_result.repair_result.outcome.value == "succeeded"
+    assert crewai_result.repair_result.outcome.value == "succeeded"
+    assert any(entry.task_name == "repair_output" and entry.status == "completed" for entry in crewai_result.orchestration_trace)
 
 
 def test_crewai_execution_engine_rejects_after_failed_high_risk_repair() -> None:

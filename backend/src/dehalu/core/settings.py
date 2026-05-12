@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     default_provider: str = "auto"
     default_language: str = "python"
     default_latency_budget_seconds: int = 15
-    orchestration_mode: str = "direct"
+    orchestration_mode: str = "crewai"
     routing_policy_version: str = "v1"
     prompt_policy_version: str = "v1"
     provider_capture_full_payloads: bool = False

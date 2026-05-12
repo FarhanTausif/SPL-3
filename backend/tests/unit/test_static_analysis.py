@@ -31,6 +31,16 @@ def test_static_analysis_flags_dangerous_symbol() -> None:
     assert any(finding.code == "dangerous_symbol" for finding in findings)
 
 
+def test_static_analysis_warns_on_unvalidated_import() -> None:
+    analyzer = StaticAnalyzer(build_language_registry())
+
+    findings = analyzer.analyze("from fast_vector_search import HybridGraphVectorIndex\n", "python")
+
+    unsupported = next(finding for finding in findings if finding.code == "unsupported_import")
+    assert unsupported.severity == StaticFindingSeverity.warning
+    assert unsupported.metadata["import"] == "fast_vector_search"
+
+
 def test_static_analysis_unknown_language_uses_fallback() -> None:
     analyzer = StaticAnalyzer(build_language_registry())
 
@@ -38,4 +48,3 @@ def test_static_analysis_unknown_language_uses_fallback() -> None:
 
     assert findings[0].code == "unsupported_language"
     assert findings[0].severity == StaticFindingSeverity.warning
-

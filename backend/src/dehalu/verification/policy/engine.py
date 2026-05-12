@@ -56,6 +56,15 @@ class PolicyEngine:
             metrics["uncertain_claim_count"] = cove_result.metrics.get("uncertain_claim_count", 0)
 
         if errors:
+            if allow_repair:
+                metrics["repair_trigger"] = RepairTrigger.deterministic_error.value
+                return PolicyDecision(
+                    state=PolicyDecisionState.repair_and_retry,
+                    reasons=[finding.message for finding in errors],
+                    hard_fail=False,
+                    score=0.0,
+                    metrics=metrics,
+                )
             return PolicyDecision(
                 state=PolicyDecisionState.reject,
                 reasons=[finding.message for finding in errors],
@@ -148,6 +157,15 @@ class PolicyEngine:
             )
 
         if risk_level == RiskLevel.high and warnings:
+            if allow_repair:
+                metrics["repair_trigger"] = RepairTrigger.deterministic_error.value
+                return PolicyDecision(
+                    state=PolicyDecisionState.repair_and_retry,
+                    reasons=[finding.message for finding in warnings],
+                    hard_fail=False,
+                    score=0.2,
+                    metrics=metrics,
+                )
             return PolicyDecision(
                 state=PolicyDecisionState.reject,
                 reasons=[finding.message for finding in warnings],

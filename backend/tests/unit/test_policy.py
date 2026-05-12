@@ -18,7 +18,7 @@ from dehalu.schemas import (
 from dehalu.verification.policy import PolicyEngine
 
 
-def test_policy_rejects_errors() -> None:
+def test_policy_repairs_errors_before_final_reject() -> None:
     decision = PolicyEngine().decide(
         [
             StaticFinding(
@@ -28,6 +28,24 @@ def test_policy_rejects_errors() -> None:
             )
         ],
         RiskLevel.medium,
+    )
+
+    assert decision.state == PolicyDecisionState.repair_and_retry
+    assert decision.hard_fail is False
+    assert decision.metrics["repair_trigger"] == "deterministic_error"
+
+
+def test_policy_rejects_errors_after_repair_attempt() -> None:
+    decision = PolicyEngine().decide(
+        [
+            StaticFinding(
+                code="syntax_error",
+                message="invalid syntax",
+                severity=StaticFindingSeverity.error,
+            )
+        ],
+        RiskLevel.medium,
+        allow_repair=False,
     )
 
     assert decision.state == PolicyDecisionState.reject
@@ -74,9 +92,10 @@ def test_policy_rejects_sandbox_errors() -> None:
 
     decision = PolicyEngine().decide([], RiskLevel.medium, sandbox_result)
 
-    assert decision.state == PolicyDecisionState.reject
-    assert decision.hard_fail is True
+    assert decision.state == PolicyDecisionState.repair_and_retry
+    assert decision.hard_fail is False
     assert decision.metrics["sandbox_status"] == "failed"
+    assert decision.metrics["repair_trigger"] == "deterministic_error"
 
 
 def test_policy_rejects_judge_fail_without_deterministic_errors() -> None:
@@ -140,6 +159,23 @@ def test_policy_rejects_judge_uncertain_for_high_risk() -> None:
 
     assert decision.state == PolicyDecisionState.reject
     assert decision.hard_fail is True
+
+
+def test_policy_repairs_high_risk_warnings_before_final_reject() -> None:
+    decision = PolicyEngine().decide(
+        [
+            StaticFinding(
+                code="unsupported_import",
+                message="Import could not be validated.",
+                severity=StaticFindingSeverity.warning,
+            )
+        ],
+        RiskLevel.high,
+    )
+
+    assert decision.state == PolicyDecisionState.repair_and_retry
+    assert decision.hard_fail is False
+    assert decision.metrics["repair_trigger"] == "deterministic_error"
 
 
 def test_policy_rejects_cove_fail_without_deterministic_errors() -> None:

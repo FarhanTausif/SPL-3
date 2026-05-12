@@ -5,6 +5,8 @@ from dehalu.schemas import StaticFinding, StaticFindingSeverity
 
 
 class StaticAnalyzer:
+    stdlib_modules = {"math", "json", "typing", "pathlib", "asyncio", "os", "sys", "re", "collections"}
+    known_packages = {"fastapi", "sqlalchemy", "pydantic", "httpx", "pytest", "structlog", "crewai", "numpy"}
     dangerous_symbols = {
         "eval": "Dynamic eval can execute untrusted code.",
         "exec": "Dynamic exec can execute untrusted code.",
@@ -44,18 +46,25 @@ class StaticAnalyzer:
 
         findings: list[StaticFinding] = []
         imports = adapter.extract_imports(code)
-        findings.extend(
-            StaticFinding(
-                code="import_detected",
-                message=f"Import detected: {import_ref.name}",
-                severity=StaticFindingSeverity.info,
-                line=import_ref.line,
-                column=import_ref.column,
-                metadata={"import": import_ref.name},
+        for import_ref in imports:
+            if not import_ref.name:
+                continue
+            root = import_ref.name.split(".")[0]
+            known = root in self.stdlib_modules or root in self.known_packages
+            findings.append(
+                StaticFinding(
+                    code="import_detected" if known else "unsupported_import",
+                    message=(
+                        f"Import detected: {import_ref.name}"
+                        if known
+                        else f"Import could not be validated against known package/tool registries: {import_ref.name}"
+                    ),
+                    severity=StaticFindingSeverity.info if known else StaticFindingSeverity.warning,
+                    line=import_ref.line,
+                    column=import_ref.column,
+                    metadata={"import": import_ref.name, "known": known},
+                )
             )
-            for import_ref in imports
-            if import_ref.name
-        )
 
         for symbol in adapter.extract_symbols(code):
             reason = self.dangerous_symbols.get(symbol.name)
@@ -72,4 +81,3 @@ class StaticAnalyzer:
                 )
 
         return findings
-
