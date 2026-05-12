@@ -22,3 +22,7 @@ __pycache__/
 .env
 .env.local
 .env.prod
+
+# dependency lockfiles
+package-lock.json
+frontend/package-lock.json
