@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from dehalu.agents.compat import HAS_CREWAI
@@ -20,6 +22,56 @@ from dehalu.state.database import get_session
 from dehalu.state.repository import RunNotFoundError, RunRepository
 
 router = APIRouter()
+
+
+def _build_health_response(
+    *,
+    settings: Settings,
+    providers,
+    orchestrator: RunOrchestrator,
+    session: Session,
+) -> HealthResponse:
+    provider_health = providers.health()
+    provider_details = providers.health_details() if hasattr(providers, "health_details") else {}
+    normalized_provider_details = _normalize_provider_health_details(provider_health, provider_details)
+    status_value = "ok" if all(provider_health.values()) else "degraded"
+    repository = RunRepository(session)
+    queue_backlog = repository.queue_backlog_summary()
+    worker_freshness = repository.worker_freshness(
+        settings.worker_id,
+        stale_after_seconds=settings.worker_lease_seconds * 2,
+    )
+    provider_role_readiness = orchestrator.router.readiness()
+    worker_readiness = _summarize_worker_readiness(worker_freshness, queue_backlog)
+    live_providers = [name for name in provider_health if name != "fake"]
+    healthy_live_providers = [name for name in live_providers if provider_health.get(name)]
+    live_provider_operation_ready = bool(healthy_live_providers) and bool(
+        provider_role_readiness.get("live_provider_operation_ready")
+    )
+    return HealthResponse(
+        status=status_value,
+        version=settings.app_version,
+        providers=provider_health,
+        orchestration={
+            "configured_mode": settings.orchestration_mode,
+            "crewai_available": HAS_CREWAI,
+            "crewai_enabled": settings.orchestration_mode == "crewai" and HAS_CREWAI,
+            "advanced_run_mode": "worker_backed",
+            "worker_id": settings.worker_id,
+            "worker_freshness": worker_freshness,
+            "queue_backlog": queue_backlog,
+            "worker_readiness": worker_readiness,
+            "provider_role_readiness": provider_role_readiness,
+            "routing_policy_version": settings.routing_policy_version,
+            "prompt_policy_version": settings.prompt_policy_version,
+            "provider_health_details": normalized_provider_details,
+            "live_provider_readiness": {
+                "configured_live_providers": live_providers,
+                "healthy_live_providers": healthy_live_providers,
+                "live_provider_operation_ready": live_provider_operation_ready,
+            },
+        },
+    )
 
 
 def _normalize_provider_health_details(
@@ -73,46 +125,11 @@ async def health(
     orchestrator: RunOrchestrator = Depends(get_orchestrator),
     session: Session = Depends(get_session),
 ) -> HealthResponse:
-    provider_health = providers.health()
-    provider_details = providers.health_details() if hasattr(providers, "health_details") else {}
-    normalized_provider_details = _normalize_provider_health_details(provider_health, provider_details)
-    status_value = "ok" if all(provider_health.values()) else "degraded"
-    repository = RunRepository(session)
-    queue_backlog = repository.queue_backlog_summary()
-    worker_freshness = repository.worker_freshness(
-        settings.worker_id,
-        stale_after_seconds=settings.worker_lease_seconds * 2,
-    )
-    provider_role_readiness = orchestrator.router.readiness()
-    worker_readiness = _summarize_worker_readiness(worker_freshness, queue_backlog)
-    live_providers = [name for name in provider_health if name != "fake"]
-    healthy_live_providers = [name for name in live_providers if provider_health.get(name)]
-    live_provider_operation_ready = bool(healthy_live_providers) and bool(
-        provider_role_readiness.get("live_provider_operation_ready")
-    )
-    return HealthResponse(
-        status=status_value,
-        version=settings.app_version,
-        providers=provider_health,
-        orchestration={
-            "configured_mode": settings.orchestration_mode,
-            "crewai_available": HAS_CREWAI,
-            "crewai_enabled": settings.orchestration_mode == "crewai" and HAS_CREWAI,
-            "advanced_run_mode": "worker_backed",
-            "worker_id": settings.worker_id,
-            "worker_freshness": worker_freshness,
-            "queue_backlog": queue_backlog,
-            "worker_readiness": worker_readiness,
-            "provider_role_readiness": provider_role_readiness,
-            "routing_policy_version": settings.routing_policy_version,
-            "prompt_policy_version": settings.prompt_policy_version,
-            "provider_health_details": normalized_provider_details,
-            "live_provider_readiness": {
-                "configured_live_providers": live_providers,
-                "healthy_live_providers": healthy_live_providers,
-                "live_provider_operation_ready": live_provider_operation_ready,
-            },
-        },
+    return _build_health_response(
+        settings=settings,
+        providers=providers,
+        orchestrator=orchestrator,
+        session=session,
     )
 
 
@@ -170,3 +187,105 @@ async def get_run_events(
         return orchestrator.get_run_events(run_id, session)
     except RunNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found") from exc
+
+
+@router.websocket("/v1/runs/{run_id}/stream")
+async def stream_run(
+    websocket: WebSocket,
+    run_id: str,
+    settings: Settings = Depends(get_app_settings),
+    providers=Depends(get_provider_registry),
+    orchestrator: RunOrchestrator = Depends(get_orchestrator),
+    session: Session = Depends(get_session),
+) -> None:
+    await websocket.accept()
+    repository = RunRepository(session)
+    last_status: str | None = None
+    last_stage_signature: tuple[tuple[str, str], ...] = ()
+    last_evidence_count = -1
+    last_event_count = -1
+
+    async def send_envelope(message_type: str, data: dict[str, Any]) -> None:
+        await websocket.send_json(
+            jsonable_encoder(
+                {
+                    "type": message_type,
+                    "runId": run_id,
+                    "timestamp": int(asyncio.get_running_loop().time() * 1000),
+                    "data": data,
+                }
+            )
+        )
+
+    try:
+        while True:
+            session.expire_all()
+            try:
+                run = orchestrator.get_run_detail(run_id, session)
+                evidence = repository.get_run_evidence(run_id)
+                events = repository.get_run_events(run_id)
+            except RunNotFoundError:
+                await send_envelope("error", {"message": "Run not found"})
+                await websocket.close(code=1008)
+                return
+
+            snapshot = {
+                "run": run.model_dump(mode="json"),
+                "evidence": [item.model_dump(mode="json") for item in evidence],
+                "events": [item.model_dump(mode="json") for item in events],
+                "health": _build_health_response(
+                    settings=settings,
+                    providers=providers,
+                    orchestrator=orchestrator,
+                    session=session,
+                ).model_dump(mode="json"),
+            }
+
+            if last_status is None:
+                await send_envelope("run.snapshot", snapshot)
+            elif run.status.value != last_status:
+                await send_envelope(
+                    "run.updated",
+                    {
+                        "status": run.status.value,
+                        "stage": run.stage_summary[-1].stage if run.stage_summary else "lifecycle",
+                    },
+                )
+
+            stage_signature = tuple((stage.stage, stage.status) for stage in run.stage_summary)
+            if last_stage_signature and stage_signature != last_stage_signature and run.stage_summary:
+                await send_envelope(
+                    "stage.updated",
+                    {
+                        "run": run.model_dump(mode="json"),
+                        "stage": run.stage_summary[-1].model_dump(mode="json"),
+                    },
+                )
+
+            if last_evidence_count >= 0 and len(evidence) != last_evidence_count:
+                await send_envelope(
+                    "evidence.collected",
+                    {
+                        "evidence": [item.model_dump(mode="json") for item in evidence],
+                        "events": [item.model_dump(mode="json") for item in events],
+                    },
+                )
+
+            terminal = run.status.value in {"completed", "failed", "needs_clarification"}
+            if terminal:
+                await send_envelope(
+                    "run.failed" if run.status.value == "failed" else "run.completed",
+                    snapshot,
+                )
+                await websocket.close(code=1000)
+                return
+
+            last_status = run.status.value
+            last_stage_signature = stage_signature
+            last_evidence_count = len(evidence)
+            last_event_count = len(events)
+
+            await send_envelope("ping", {"event_count": last_event_count})
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        return

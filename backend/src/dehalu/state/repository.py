@@ -19,6 +19,7 @@ from dehalu.schemas import (
     NormalizedRequest,
     OrchestrationTraceEntry,
     PolicyDecision,
+    RepairAttempt,
     RepairOutcome,
     RepairResult,
     RunDetail,
@@ -506,16 +507,17 @@ class RunRepository:
     def get_run_detail(self, run_id: str) -> RunDetail:
         run_record = self._get_run(run_id)
         evidence_summary = Counter(record.kind for record in run_record.evidence)
+        policy_decision = (
+            PolicyDecision.model_validate(run_record.policy_decision)
+            if run_record.policy_decision is not None
+            else None
+        )
         return RunDetail(
             run_id=run_record.id,
             created_at=run_record.created_at,
             normalized_request=NormalizedRequest.model_validate(run_record.normalized_request),
             status=RunLifecycleStatus(run_record.status),
-            policy_decision=(
-                PolicyDecision.model_validate(run_record.policy_decision)
-                if run_record.policy_decision is not None
-                else None
-            ),
+            policy_decision=policy_decision,
             clarification_result=(
                 ClarificationResult.model_validate(run_record.clarification_result)
                 if run_record.clarification_result is not None
@@ -526,6 +528,12 @@ class RunRepository:
                 if run_record.fused_metrics is not None
                 else None
             ),
+            coder_output=(
+                CoderOutput.model_validate(run_record.coder_output)
+                if run_record.coder_output is not None
+                else None
+            ),
+            repair_result=self._reconstruct_repair_result(run_record, policy_decision),
             stage_summary=[
                 StageStatus.model_validate(item)
                 for item in (run_record.stage_summary or [])
@@ -593,6 +601,31 @@ class RunRepository:
             )
             for event in run_record.events
         ]
+
+    def _reconstruct_repair_result(
+        self,
+        run_record: RunRecord,
+        policy_decision: PolicyDecision | None,
+    ) -> RepairResult | None:
+        attempts = [
+            RepairAttempt.model_validate(record.payload)
+            for record in run_record.evidence
+            if record.kind == EvidenceKind.repair.value
+        ]
+        if not attempts:
+            return None
+        if policy_decision and policy_decision.state.value == "reject":
+            outcome = RepairOutcome.failed
+        elif attempts[-1].output_code:
+            outcome = RepairOutcome.succeeded
+        else:
+            outcome = RepairOutcome.attempted
+        return RepairResult(
+            outcome=outcome,
+            attempts=attempts,
+            final_attempt_number=attempts[-1].attempt_number,
+            metrics={"reconstructed_from_evidence": True},
+        )
 
     def queue_backlog_summary(self) -> dict[str, int | bool]:
         queued = self.session.scalar(

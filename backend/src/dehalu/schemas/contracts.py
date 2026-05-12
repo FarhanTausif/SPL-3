@@ -51,6 +51,7 @@ class RepairOutcome(StrEnum):
 
 
 class RepairTrigger(StrEnum):
+    deterministic_error = "deterministic_error"
     judge_fail = "judge_fail"
     judge_uncertain = "judge_uncertain"
     cove_fail = "cove_fail"
@@ -403,6 +404,8 @@ class RunDetail(BaseModel):
     policy_decision: PolicyDecision | None = None
     clarification_result: ClarificationResult | None = None
     fused_metrics: FusedHallucinationMetrics | None = None
+    coder_output: CoderOutput | None = None
+    repair_result: RepairResult | None = None
     stage_summary: list[StageStatus] = Field(default_factory=list)
     evidence_summary: dict[str, int]
 
