@@ -1,321 +1,184 @@
 'use client'
 
+import { useMemo, useState } from 'react'
+import type React from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
-import { useRunStore } from '@/stores/runStore'
-import { useRunStatus } from '@/hooks/useRunStatus'
-import { useRunUpdates } from '@/hooks/useRunUpdates'
-import { WorkflowDAG, EvidencePanel, MetricsPanel } from '@/components/workflow'
-import { ResultsDisplay } from '@/components/ResultsDisplay'
-import { ArrowLeft, Copy, CheckCircle2, Zap } from 'lucide-react'
 import { motion } from 'framer-motion'
-import { useHistoryStore } from '@/stores/historyStore'
+import { ArrowLeft, CheckCircle2, Copy, Radio, RefreshCcw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import { useRunStore } from '@/stores/runStore'
+import { useHealth, useRunEvidence, useRunEvents, useRunStatus } from '@/hooks/useRunStatus'
+import { useRunUpdates } from '@/hooks/useRunUpdates'
+import { buildOrchestrationViewModel } from '@/lib/orchestration'
+import { OrchestrationFlow } from '@/components/orchestration/OrchestrationFlow'
+import { StageInspector } from '@/components/orchestration/StageInspector'
+import { EvidenceTimeline } from '@/components/orchestration/EvidenceTimeline'
+import { RunMetricsPanel } from '@/components/orchestration/RunMetricsPanel'
+import { CodeResultPanel } from '@/components/orchestration/CodeResultPanel'
+import { StatusBadge } from '@/components/orchestration/StatusBadge'
 
 export default function MonitorPage() {
   const params = useParams()
   const router = useRouter()
   const runId = params.id as string
-  const { data: runStatus } = useRunStatus(runId)
-  const currentRun = useRunStore((state) => state.currentRun)
   const [copiedId, setCopiedId] = useState(false)
-  const [elapsedTime, setElapsedTime] = useState(0)
-  const [wsConnected, setWsConnected] = useState(false)
-  const addToHistory = useHistoryStore((state) => state.addToHistory)
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null)
 
-  // Use WebSocket for real-time updates
-  const { isWSConnected } = useRunUpdates(
-    runId,
-    (status) => {
-      console.log('[Monitor] Status update:', status)
-    },
-    (agentName, agentStatus) => {
-      console.log('[Monitor] Agent update:', agentName, agentStatus)
-    }
+  const currentRun = useRunStore((state) => state.currentRun)
+  const evidence = useRunStore((state) => state.evidence)
+  const events = useRunStore((state) => state.events)
+
+  const runQuery = useRunStatus(runId)
+  useRunEvidence(runId)
+  useRunEvents(runId)
+  const healthQuery = useHealth()
+  const { isWSConnected, isPolling } = useRunUpdates(runId)
+
+  const viewModel = useMemo(
+    () => buildOrchestrationViewModel({
+      run: currentRun,
+      evidence,
+      events,
+      health: healthQuery.data,
+    }),
+    [currentRun, evidence, events, healthQuery.data]
   )
 
-  useEffect(() => {
-    setWsConnected(isWSConnected)
-  }, [isWSConnected])
-
-  const isComplete = currentRun && (currentRun.status === 'completed' || currentRun.status === 'failed')
-
-  // Update elapsed time
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setElapsedTime((prev) => prev + 1)
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Add to history on completion
-  useEffect(() => {
-    if (isComplete && currentRun) {
-      addToHistory({
-        runId,
-        prompt: currentRun.user_prompt || '',
-        language: 'unknown',
-        status: (currentRun.status as any) || 'completed',
-        halluckinationScore: 1 - (currentRun.confidence || 0.5),
-        verdict: (currentRun.verdict as any) || null,
-        createdAt: Date.now(),
-        duration: elapsedTime,
-        generatedCode: currentRun.generated_code || '',
-      })
-    }
-  }, [isComplete, elapsedTime])
+  const selectedStage = viewModel.stages.find((stage) => stage.id === (selectedStageId || viewModel.activeStageId))
+  const terminal = currentRun?.status === 'completed' || currentRun?.status === 'failed' || currentRun?.status === 'needs_clarification'
 
   const handleCopyId = () => {
     navigator.clipboard.writeText(runId)
     setCopiedId(true)
-    setTimeout(() => setCopiedId(false), 2000)
+    setTimeout(() => setCopiedId(false), 1600)
   }
-
-  // Build agents from current run status
-  const agents = [
-    {
-      name: 'Clarification',
-      role: 'Agent',
-      status: (currentRun?.status === 'queued' ? 'idle' : 'complete') as 'idle' | 'running' | 'complete' | 'error',
-      progress: 100,
-      duration: 100,
-      stage: 'Clarification',
-    },
-    {
-      name: 'Generation',
-      role: 'Code Generator',
-      status: (currentRun?.status === 'queued' ? 'idle' : currentRun?.status === 'completed' ? 'complete' : 'running') as any,
-      progress: currentRun?.status === 'completed' ? 100 : 50,
-      duration: currentRun?.status === 'completed' ? 500 : undefined,
-      stage: 'Generation',
-    },
-    {
-      name: 'Claim Extraction',
-      role: 'Analyzer',
-      status: (currentRun?.status === 'completed' ? 'complete' : 'idle') as any,
-      progress: currentRun?.status === 'completed' ? 100 : 0,
-      stage: 'Verification',
-    },
-    {
-      name: 'Static Analysis',
-      role: 'Analyzer',
-      status: (currentRun?.status === 'completed' ? 'complete' : 'idle') as any,
-      progress: currentRun?.status === 'completed' ? 100 : 0,
-      stage: 'Verification',
-    },
-    {
-      name: 'Sandbox',
-      role: 'Executor',
-      status: (currentRun?.status === 'completed' ? 'complete' : 'idle') as any,
-      progress: currentRun?.status === 'completed' ? 100 : 0,
-      duration: currentRun?.status === 'completed' ? 50 : undefined,
-      stage: 'Verification',
-    },
-    {
-      name: 'Judge',
-      role: 'Verifier',
-      status: (currentRun?.status === 'completed' ? 'complete' : 'idle') as any,
-      progress: currentRun?.status === 'completed' ? 100 : 0,
-      stage: 'Verification',
-    },
-  ]
-
-  const evidence = (currentRun as any)?.evidence || []
-
-  const metrics = {
-    hallucination_risk_score: currentRun?.confidence ? 1 - currentRun.confidence : 0.3,
-    confidence: currentRun?.confidence || 0.7,
-    verification_progress: {
-      claims_verified: 9,
-      claims_total: 9,
-      static_passed: true,
-      sandbox_passed: true,
-      judge_score: currentRun?.confidence || 0.8,
-      cove_verified_percent: 100,
-    },
-    timing: {
-      generation_ms: 500,
-      claims_ms: 100,
-      static_ms: 50,
-      sandbox_ms: 10,
-      judge_ms: 300,
-      cove_ms: 50,
-      policy_ms: 5,
-    },
-    alerts: [],
-  }
-
-  const policyDecision = (currentRun?.verdict as any) || 'accept'
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-6 px-4" id="main-content">
-      {/* Skip Link */}
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:block absolute top-4 left-4 bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium z-50"
-      >
-        Skip to main content
-      </a>
-
-      {/* Header */}
-      <motion.div
-        className="max-w-7xl mx-auto mb-6"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
-        {/* Navigation */}
-        <button
-          onClick={() => router.push('/')}
-          aria-label="Back to home page"
-          className="flex items-center gap-2 text-blue-600 hover:text-blue-800 mb-4 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-2 py-1"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Home
-        </button>
-
-        {/* Title Section */}
-        <div className="flex items-start justify-between mb-4 gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900">
-                {isComplete ? '✅ Verification Complete' : '⏳ Verification In Progress'}
-              </h1>
-              {wsConnected && (
-                <motion.div
-                  animate={{ scale: [1, 1.1, 1] }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                  className="flex items-center gap-1 text-green-600 text-sm font-medium"
-                >
-                  <Zap className="w-4 h-4" />
-                  Live
-                </motion.div>
-              )}
+    <main className="min-h-screen bg-background px-4 py-6 text-foreground">
+      <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
+        <header className="rounded-lg border bg-card p-4 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <Button type="button" variant="ghost" size="sm" onClick={() => router.push('/')} className="mb-3 px-0">
+                <ArrowLeft className="h-4 w-4" />
+                New prompt
+              </Button>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-2xl font-semibold tracking-normal">CrewAI Orchestration Run</h1>
+                <StatusBadge status={currentRun?.status || 'queued'} />
+                <Badge variant={isWSConnected ? 'success' : 'warning'}>
+                  <Radio className="mr-1 h-3 w-3" />
+                  {isWSConnected ? 'live stream' : isPolling ? 'polling fallback' : 'connecting'}
+                </Badge>
+              </div>
+              <p className="mt-2 max-w-4xl text-sm text-muted-foreground">
+                {currentRun?.normalized_request.prompt || 'Loading run prompt and orchestration state.'}
+              </p>
             </div>
-            <p className="text-slate-600 mt-2 text-sm sm:text-base">
-              Status: <span className="font-semibold text-slate-900">{currentRun?.status || 'queued'}</span>
-              {!wsConnected && <span className="text-orange-600 ml-2">(Polling)</span>}
-            </p>
-          </div>
 
-          {/* Info Panel - Desktop */}
-          <motion.div
-            className="hidden lg:block bg-white rounded-lg border border-slate-200 p-4 min-w-fit"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.2 }}
-          >
-            <div className="space-y-2 text-sm">
-              <div>
-                <p className="text-slate-600">Run ID</p>
-                <button
-                  onClick={handleCopyId}
-                  aria-label={`Copy run ID: ${runId}`}
-                  className="flex items-center gap-2 font-mono text-xs bg-slate-100 px-2 py-1 rounded hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {runId.slice(0, 8)}...
-                  {copiedId ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-                </button>
-              </div>
-              <div>
-                <p className="text-slate-600">Elapsed</p>
-                <p className="font-semibold">{Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s</p>
-              </div>
-              <div>
-                <p className="text-slate-600">Risk Score</p>
-                <p className="font-semibold">{(metrics.hallucination_risk_score * 100).toFixed(1)}%</p>
-              </div>
+            <div className="grid min-w-0 grid-cols-2 gap-3 text-sm md:grid-cols-4 lg:min-w-[620px]">
+              <RunFact label="Run ID" value={runId.slice(0, 8)} action={(
+                <Button type="button" variant="ghost" size="icon" onClick={handleCopyId} aria-label="Copy run ID">
+                  {copiedId ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              )} />
+              <RunFact label="Mode" value={currentRun?.normalized_request.run_mode || 'loading'} />
+              <RunFact label="Language" value={currentRun?.normalized_request.language || 'loading'} />
+              <RunFact label="Risk" value={`${viewModel.riskPercent}%`} />
             </div>
-          </motion.div>
-        </div>
-
-        {/* Info Panel - Mobile */}
-        <motion.div
-          className="lg:hidden bg-white rounded-lg border border-slate-200 p-3 grid grid-cols-3 gap-3"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-        >
-          <div>
-            <p className="text-xs text-slate-600">Run ID</p>
-            <button
-              onClick={handleCopyId}
-              aria-label={`Copy run ID: ${runId}`}
-              className="flex items-center gap-1 font-mono text-xs bg-slate-100 px-2 py-1 rounded hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
-            >
-              {runId.slice(0, 4)}...
-              {copiedId ? <CheckCircle2 className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
-            </button>
           </div>
-          <div>
-            <p className="text-xs text-slate-600">Elapsed</p>
-            <p className="font-semibold text-xs mt-1">{Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s</p>
+
+          <Separator className="my-4" />
+
+          <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-4">
+            <RunFact label="CrewAI" value={healthQuery.data?.orchestration.crewai_enabled ? 'enabled' : 'not enabled'} />
+            <RunFact label="Worker" value={String(healthQuery.data?.orchestration.worker_readiness?.state || 'unknown')} />
+            <RunFact label="Providers" value={viewModel.providerSummary} />
+            <RunFact label="Policy" value={viewModel.policyLabel} />
           </div>
-          <div>
-            <p className="text-xs text-slate-600">Risk</p>
-            <p className="font-semibold text-xs mt-1">{(metrics.hallucination_risk_score * 100).toFixed(1)}%</p>
-          </div>
-        </motion.div>
-      </motion.div>
+        </header>
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto">
-        {isComplete ? (
-          <ResultsDisplay />
-        ) : (
-          <motion.div
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 auto-rows-max lg:auto-rows-fr"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3, staggerChildren: 0.1 }}
-          >
-            {/* Left: Workflow DAG */}
-            <motion.div
-              className="md:col-span-2 lg:col-span-2 bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden"
-              style={{ minHeight: '400px', height: 'auto', maxHeight: '600px' }}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <WorkflowDAG
-                agents={agents}
-                policyDecision={policyDecision}
-                isRepairLoopActive={policyDecision === 'repair' && !isComplete}
-              />
-            </motion.div>
-
-            {/* Right: Metrics Panel */}
-            <motion.div
-              className="md:col-span-2 lg:col-span-1 bg-white rounded-lg border border-slate-200 shadow-sm"
-              style={{ minHeight: '400px', height: 'auto', maxHeight: '600px' }}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <MetricsPanel metrics={metrics} policyDecision={policyDecision} />
-            </motion.div>
-
-            {/* Bottom: Evidence Panel */}
-            <motion.div
-              className="col-span-1 md:col-span-2 lg:col-span-3 bg-white rounded-lg border border-slate-200 shadow-sm"
-              style={{ minHeight: '300px', height: 'auto', maxHeight: '500px' }}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-            >
-              <EvidencePanel
-                evidence={evidence.map((e: any) => ({
-                  kind: e.evidence_kind || e.kind || 'policy_decision',
-                  summary: e.finding || e.summary || 'Result',
-                  status: e.severity === 'error' ? 'error' : e.severity === 'warning' ? 'warning' : 'success',
-                  payload: e,
-                  timestamp: e.timestamp,
-                }))}
-                loading={false}
-              />
-            </motion.div>
-          </motion.div>
+        {runQuery.isError && (
+          <Card className="border-destructive">
+            <CardContent className="flex items-center justify-between gap-3 p-4">
+              <p className="text-sm text-destructive">Unable to load the run. Check the backend and retry.</p>
+              <Button type="button" variant="outline" size="sm" onClick={() => runQuery.refetch()}>
+                <RefreshCcw className="h-4 w-4" />
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
         )}
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Execution Flow</CardTitle>
+                <CardDescription>
+                  Prompt-to-result pipeline with parallel verification branches and conditional repair loop.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <OrchestrationFlow
+                  stages={viewModel.stages}
+                  selectedStageId={selectedStage?.id || viewModel.activeStageId}
+                  onSelectStage={setSelectedStageId}
+                />
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <RunMetricsPanel run={currentRun} viewModel={viewModel} />
+              <Card>
+                <CardHeader>
+                  <CardTitle>Evidence & Event Timeline</CardTitle>
+                  <CardDescription>
+                    Backend records shown in arrival order. No frontend-simulated evidence is inserted.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <EvidenceTimeline evidence={evidence} events={events} />
+                </CardContent>
+              </Card>
+            </div>
+
+            {terminal && <CodeResultPanel runResponse={currentRun} />}
+          </section>
+
+          <motion.aside
+            className="min-h-[520px]"
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.35 }}
+          >
+            <StageInspector stage={selectedStage} />
+          </motion.aside>
+        </div>
       </div>
     </main>
+  )
+}
+
+function RunFact({
+  label,
+  value,
+  action,
+}: {
+  label: string
+  value: string
+  action?: React.ReactNode
+}) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-xs uppercase text-muted-foreground">{label}</p>
+        <p className="mt-0.5 truncate font-medium capitalize">{value}</p>
+      </div>
+      {action}
+    </div>
   )
 }
