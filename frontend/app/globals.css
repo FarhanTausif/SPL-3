@@ -1,44 +1,72 @@
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/inter/800.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html {
-  scroll-behavior: smooth;
-  color-scheme: light dark;
-}
+@layer base {
+  :root {
+    --background: 220 42% 4%;
+    --foreground: 210 40% 98%;
+    --card: 222 38% 7%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 38% 7%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 213 94% 68%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 222 32% 12%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 222 28% 13%;
+    --muted-foreground: 215 20.2% 70%;
+    --accent: 222 32% 14%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 218 28% 16%;
+    --input: 218 28% 16%;
+    --ring: 213 94% 68%;
+    --radius: 0.5rem;
+  }
 
-body {
-  @apply bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 text-slate-900 dark:text-slate-50 transition-colors duration-300;
-}
+  .dark {
+    --background: 220 42% 4%;
+    --foreground: 210 40% 98%;
+    --card: 222 38% 7%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 38% 7%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 213 94% 68%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 222 32% 12%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 222 28% 13%;
+    --muted-foreground: 215 20.2% 70%;
+    --accent: 222 32% 14%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 218 28% 16%;
+    --input: 218 28% 16%;
+    --ring: 213 94% 68%;
+  }
 
-/* Dark mode color overrides */
-html.dark {
-  color-scheme: dark;
-}
+  * {
+    @apply border-border;
+  }
 
-html.dark body {
-  @apply bg-gradient-to-br from-slate-900 to-slate-800;
-}
+  html {
+    scroll-behavior: smooth;
+  }
 
-/* Dark mode component overrides */
-html.dark .glass {
-  @apply bg-slate-800/30 border-slate-700/20;
-}
-
-html.dark .badge-success {
-  @apply bg-green-900 text-green-200;
-}
-
-html.dark .badge-warning {
-  @apply bg-yellow-900 text-yellow-200;
-}
-
-html.dark .badge-error {
-  @apply bg-red-900 text-red-200;
-}
-
-html.dark .badge-info {
-  @apply bg-blue-900 text-blue-200;
+  body {
+    @apply bg-background text-foreground antialiased transition-colors duration-300;
+    font-family: Inter, Arial, Helvetica, sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
 }
 
 /* Accessibility utilities */
@@ -64,15 +92,6 @@ html.dark .badge-info {
       @apply !transition-none !animate-none;
     }
   }
-}
-
-/* Glassmorphism effect */
-.glass {
-  @apply bg-white/30 backdrop-blur-md border border-white/20 rounded-lg shadow-xl;
-}
-
-.glass-sm {
-  @apply bg-white/20 backdrop-blur-sm border border-white/10;
 }
 
 /* Smooth transitions */

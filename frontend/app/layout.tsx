@@ -30,7 +30,7 @@ function RootLayoutContent({
 
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="bg-background">
+      <body className="bg-background font-sans">
         <ThemeProvider>
           <ErrorBoundary fallback={(error, retry) => (
             <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center px-4">
