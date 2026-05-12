@@ -18,10 +18,10 @@ describe('Home Page', () => {
 
   it('displays input form elements', () => {
     // Check for prompt input
-    cy.get('textarea, input[placeholder*="prompt" i]').should('exist')
+    cy.get('textarea').should('exist')
     
-    // Check for language selector
-    cy.get('select').should('exist')
+    // User-facing configuration is intentionally hidden.
+    cy.get('select').should('not.exist')
   })
 
   it('validates required fields', () => {
@@ -43,11 +43,11 @@ describe('Home Page', () => {
     cy.url().should('include', '/monitor/')
   })
 
-  it('displays all language options', () => {
-    cy.get('select').first().click()
-    
-    // Check for common languages
-    cy.get('option').should('have.length.greaterThan', 1)
+  it('keeps orchestration configuration out of the prompt form', () => {
+    cy.contains('Language').should('not.exist')
+    cy.contains('Run mode').should('not.exist')
+    cy.contains('Provider override').should('not.exist')
+    cy.contains('Verification strictness').should('not.exist')
   })
 
   it('has accessible form elements', () => {

@@ -9,7 +9,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { getWebSocketClient, WSMessage, RunUpdateData, AgentUpdateData, EvidenceCollectedData } from '@/lib/websocket';
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/lib/api';
+import { apiClient, EventRecord, EvidenceRecord, RunDetail, RunSnapshot, StageStatus } from '@/lib/api';
+import { useRunStore } from '@/stores/runStore';
 
 /**
  * Hook for real-time run updates via WebSocket or polling fallback
@@ -22,6 +23,9 @@ export function useRunUpdates(
   const wsClient = getWebSocketClient();
   const unsubscribeRef = useRef<(() => void)[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
+  const setCurrentRun = useRunStore((state) => state.setCurrentRun);
+  const setEvidence = useRunStore((state) => state.setEvidence);
+  const setEvents = useRunStore((state) => state.setEvents);
 
   // Fallback polling query
   const { data: pollData, isFetching } = useQuery({
@@ -33,6 +37,11 @@ export function useRunUpdates(
   });
 
   useEffect(() => {
+    if (!pollData || wsConnected) return;
+    setCurrentRun(pollData as RunDetail);
+  }, [pollData, setCurrentRun, wsConnected]);
+
+  useEffect(() => {
     if (!runId) return;
 
     // Try WebSocket first
@@ -42,6 +51,13 @@ export function useRunUpdates(
         setWsConnected(true);
         console.log('[useRunUpdates] WebSocket connected');
 
+        const unsubSnapshot = wsClient.on('run.snapshot', (msg: WSMessage<RunSnapshot>) => {
+          if (msg.data.run) setCurrentRun(msg.data.run);
+          setEvidence(msg.data.evidence || []);
+          setEvents(msg.data.events || []);
+          if (msg.data.run?.status && onStatusChange) onStatusChange(msg.data.run.status);
+        });
+
         // Subscribe to run updates
         const unsubRun = wsClient.on('run.updated', (msg: WSMessage<RunUpdateData>) => {
           if (msg.data.status && onStatusChange) {
@@ -49,11 +65,34 @@ export function useRunUpdates(
           }
         });
 
+        const unsubStage = wsClient.on('stage.updated', (msg: WSMessage<{ run: RunDetail; stage: StageStatus }>) => {
+          if (msg.data.run) setCurrentRun(msg.data.run);
+        });
+
+        const unsubEvidence = wsClient.on('evidence.collected', (msg: WSMessage<{ evidence: EvidenceRecord[]; events: EventRecord[] }>) => {
+          setEvidence(msg.data.evidence || []);
+          setEvents(msg.data.events || []);
+        });
+
         // Subscribe to run completion
-        const unsubComplete = wsClient.on('run.completed', (msg: WSMessage<RunUpdateData>) => {
+        const unsubComplete = wsClient.on('run.completed', (msg: WSMessage<RunSnapshot>) => {
+          if (msg.data.run) setCurrentRun(msg.data.run);
+          setEvidence(msg.data.evidence || []);
+          setEvents(msg.data.events || []);
           if (onStatusChange) {
             onStatusChange('completed');
           }
+          wsClient.disconnect();
+          setWsConnected(false);
+        });
+
+        const unsubFailed = wsClient.on('run.failed', (msg: WSMessage<RunSnapshot>) => {
+          if (msg.data.run) setCurrentRun(msg.data.run);
+          setEvidence(msg.data.evidence || []);
+          setEvents(msg.data.events || []);
+          if (onStatusChange) onStatusChange('failed');
+          wsClient.disconnect();
+          setWsConnected(false);
         });
 
         // Subscribe to agent updates
@@ -63,7 +102,7 @@ export function useRunUpdates(
           }
         });
 
-        unsubscribeRef.current = [unsubRun, unsubComplete, unsubAgent];
+        unsubscribeRef.current = [unsubSnapshot, unsubRun, unsubStage, unsubEvidence, unsubComplete, unsubFailed, unsubAgent];
       })
       .catch((error) => {
         console.warn('[useRunUpdates] WebSocket connection failed, using polling:', error);

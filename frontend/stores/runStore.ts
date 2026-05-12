@@ -1,10 +1,10 @@
 import { create } from 'zustand'
-import { RunResponse, EvidenceRecord, EventRecord } from '@/lib/api'
+import { EvidenceRecord, EventRecord, RunDetail } from '@/lib/api'
 
 export interface RunStore {
   // Current run
   runId: string | null
-  currentRun: RunResponse | null
+  currentRun: RunDetail | null
   evidence: EvidenceRecord[]
   events: EventRecord[]
 
@@ -15,7 +15,7 @@ export interface RunStore {
 
   // Actions
   setRunId: (id: string) => void
-  setCurrentRun: (run: RunResponse) => void
+  setCurrentRun: (run: RunDetail) => void
   setEvidence: (evidence: EvidenceRecord[]) => void
   setEvents: (events: EventRecord[]) => void
   setLoading: (loading: boolean) => void

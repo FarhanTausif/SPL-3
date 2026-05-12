@@ -1,82 +1,151 @@
-import Link from 'next/link'
+'use client'
+
+import { Activity, Cpu, Network, ShieldCheck, Users } from 'lucide-react'
 import { VerificationForm } from '@/components/VerificationForm'
-import { Zap } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
+import { useHealth } from '@/hooks/useRunStatus'
+
+const flowPreview = [
+  ['Prompt', 'Clarify'],
+  ['Generate', 'Extract claims'],
+  ['Static', 'Sandbox'],
+  ['Judge', 'CoVE'],
+  ['Panel', 'Policy'],
+  ['Repair', 'Result'],
+]
 
 export default function Home() {
+  const { data: health, error: healthError, isLoading: healthLoading } = useHealth()
+  const providers = health ? Object.entries(health.providers) : []
+  const workerReady = Boolean(health?.orchestration.worker_readiness?.ready)
+
   return (
-    <main className="min-h-screen py-12 px-4">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Zap className="w-8 h-8 text-primary" />
-            <h1 className="text-4xl font-bold text-gray-900">DeHalu</h1>
+    <main className="min-h-screen bg-background px-4 py-6 text-foreground">
+      <div className="mx-auto flex max-w-7xl flex-col gap-6">
+        <header className="flex flex-col gap-4 rounded-lg border border-white/10 bg-card/80 p-5 shadow-2xl shadow-black/30 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="rounded-md border border-white/10 bg-black/30 p-2">
+                <ShieldCheck className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold tracking-normal md:text-3xl">DeHalu Orchestration Console</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Live CrewAI hallucination detection, verification, policy, and mitigation flow.
+                </p>
+              </div>
+            </div>
           </div>
-          <p className="text-xl text-gray-600">
-            AI-Powered Code Hallucination Detection & Mitigation
-          </p>
-          <p className="text-gray-600 mt-2">
-            Verify your AI-generated code with 9 verification agents
-          </p>
-        </div>
+          <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+            <HealthMetric icon={Activity} label="API" value={healthLoading ? 'checking' : health?.status || 'offline'} ready={health?.status === 'ok'} />
+            <HealthMetric icon={Users} label="CrewAI" value={health?.orchestration.crewai_enabled ? 'enabled' : 'available'} ready={Boolean(health?.orchestration.crewai_available)} />
+            <HealthMetric icon={Cpu} label="Worker" value={String(health?.orchestration.worker_readiness?.state || 'unknown')} ready={workerReady} />
+            <HealthMetric icon={Network} label="Queue" value={String(health?.orchestration.queue_backlog?.total ?? 0)} ready={!health?.orchestration.queue_backlog?.has_backlog} />
+          </div>
+        </header>
 
-        {/* Main Card */}
-        <div className="glass p-8 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">
-            Start New Verification
-          </h2>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(460px,1.05fr)]">
           <VerificationForm />
-        </div>
 
-        {/* Info Section */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="glass p-6">
-            <h3 className="font-semibold text-gray-900 mb-2">🔍 Detection</h3>
-            <p className="text-sm text-gray-600">
-              9 AI agents verify your code for hallucinations in real-time
-            </p>
-          </div>
-          <div className="glass p-6">
-            <h3 className="font-semibold text-gray-900 mb-2">✨ Mitigation</h3>
-            <p className="text-sm text-gray-600">
-              Automatic code repair if hallucinations are detected
-            </p>
-          </div>
-          <div className="glass p-6">
-            <h3 className="font-semibold text-gray-900 mb-2">📊 Insights</h3>
-            <p className="text-sm text-gray-600">
-              Detailed evidence and confidence scores
-            </p>
-          </div>
-        </div>
+          <div className="space-y-6">
+            <Card className="border-white/10 bg-card/80 shadow-2xl shadow-black/20">
+              <CardHeader>
+                <CardTitle>Backend Flow Preview</CardTitle>
+                <CardDescription>
+                  The monitor renders this graph from run events and evidence once execution starts.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                  {flowPreview.flat().map((stage, index) => (
+                    <div key={stage} className="rounded-lg border border-white/10 bg-black/30 p-4">
+                      <p className="text-xs text-muted-foreground">Step {index + 1}</p>
+                      <p className="mt-1 text-sm font-semibold">{stage}</p>
+                    </div>
+                  ))}
+                </div>
+                <Separator className="my-5" />
+                <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+                  <InfoRow label="Orchestration mode" value={healthLoading ? 'checking' : health?.orchestration.configured_mode || 'unavailable'} />
+                  <InfoRow label="Routing policy" value={healthLoading ? 'checking' : health?.orchestration.routing_policy_version || 'unavailable'} />
+                  <InfoRow label="Prompt policy" value={healthLoading ? 'checking' : health?.orchestration.prompt_policy_version || 'unavailable'} />
+                  <InfoRow label="Strictness" value="very strict" />
+                </div>
+                {healthError && (
+                  <p className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                    Backend health is not reachable from the browser. Confirm the API is running on port 8000.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-        {/* Features */}
-        <div className="mt-12 pt-8 border-t border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">How It Works</h3>
-          <ol className="space-y-3 text-gray-700">
-            <li className="flex gap-3">
-              <span className="font-bold text-primary">1.</span>
-              <span>Enter your code generation prompt</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="font-bold text-primary">2.</span>
-              <span>Select programming language and verification strictness</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="font-bold text-primary">3.</span>
-              <span>Watch real-time verification progress</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="font-bold text-primary">4.</span>
-              <span>Review verification results and evidence</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="font-bold text-primary">5.</span>
-              <span>Get repaired code if hallucinations were detected</span>
-            </li>
-          </ol>
+            <Card className="border-white/10 bg-card/80 shadow-2xl shadow-black/20">
+              <CardHeader>
+                <CardTitle>Provider Readiness</CardTitle>
+                <CardDescription>Model availability and routing health from the backend.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {providers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Provider readiness is loading.</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {providers.map(([name, ready]) => {
+                      const details = health?.orchestration.provider_health_details?.[name]
+                      return (
+                        <div key={name} className="rounded-lg border border-white/10 bg-black/30 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-medium">{name}</p>
+                            <Badge variant={ready ? 'success' : 'warning'}>{ready ? 'ready' : 'degraded'}</Badge>
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Smoke: {String(details?.live_smoke_check || 'unknown')} · API key: {details?.api_key_present ? 'present' : 'not present'}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </main>
+  )
+}
+
+function HealthMetric({
+  icon: Icon,
+  label,
+  value,
+  ready,
+}: {
+  icon: typeof Activity
+  label: string
+  value: string
+  ready: boolean
+}) {
+  return (
+    <div className="rounded-md border border-white/10 bg-black/30 p-3">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <span className="truncate text-sm font-semibold">{value}</span>
+        <span className={`h-2 w-2 rounded-full ${ready ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+      </div>
+    </div>
+  )
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-black/30 px-3 py-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="truncate font-medium">{value}</span>
+    </div>
   )
 }

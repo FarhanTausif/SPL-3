@@ -1,37 +1,31 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
+import { AlertCircle, Loader2, Play } from 'lucide-react'
 import { runApi, CreateRunRequest } from '@/lib/api'
 import { useRunStore } from '@/stores/runStore'
-import { AlertCircle, Loader } from 'lucide-react'
-
-const LANGUAGES = [
-  { value: 'python', label: 'Python' },
-  { value: 'javascript', label: 'JavaScript' },
-  { value: 'typescript', label: 'TypeScript' },
-  { value: 'java', label: 'Java' },
-  { value: 'cpp', label: 'C++' },
-  { value: 'csharp', label: 'C#' },
-  { value: 'go', label: 'Go' },
-  { value: 'rust', label: 'Rust' },
-]
-
-const RISK_LEVELS = [
-  { value: 'low', label: 'Low - Fast & simple code' },
-  { value: 'medium', label: 'Medium - Standard verification' },
-  { value: 'high', label: 'High - Strict verification' },
-]
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Textarea } from '@/components/ui/textarea'
 
 export function VerificationForm() {
   const router = useRouter()
   const setRunId = useRunStore((state) => state.setRunId)
 
   const [prompt, setPrompt] = useState('')
-  const [language, setLanguage] = useState('python')
-  const [riskLevel, setRiskLevel] = useState('medium')
   const [validationError, setValidationError] = useState('')
+
+  useEffect(() => {
+    const savedPrompt = window.localStorage.getItem('dehalu.promptDraft')
+    if (savedPrompt) setPrompt(savedPrompt)
+  }, [])
+
+  const updatePrompt = (value: string) => {
+    setPrompt(value)
+    window.localStorage.setItem('dehalu.promptDraft', value)
+  }
 
   const mutation = useMutation({
     mutationFn: (request: CreateRunRequest) => runApi.createRun(request),
@@ -44,117 +38,78 @@ export function VerificationForm() {
     },
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
     setValidationError('')
 
-    // Validation
     if (!prompt.trim()) {
-      setValidationError('Prompt is required')
+      setValidationError('Prompt is required.')
       return
     }
-
     if (prompt.trim().length < 10) {
-      setValidationError('Prompt must be at least 10 characters')
+      setValidationError('Prompt must be at least 10 characters.')
       return
     }
-
     if (prompt.trim().length > 5000) {
-      setValidationError('Prompt must not exceed 5000 characters')
+      setValidationError('Prompt must not exceed 5000 characters.')
       return
     }
 
-    // Submit
     mutation.mutate({
       prompt: prompt.trim(),
-      language,
-      risk_level: riskLevel,
+      risk_level: 'high',
+      run_mode: 'advanced',
+      latency_budget_seconds: 90,
+      acceptance_criteria: [],
+      tool_policy: {
+        max_calls_per_role: 5,
+        timeout_seconds: 12,
+        allow_repo_context: true,
+        allow_web_lookup: true,
+        allowed_domains: ['pypi.org'],
+      },
     })
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Prompt Input */}
-      <div>
-        <label htmlFor="prompt" className="block text-sm font-medium text-gray-900 mb-2">
-          Code Generation Prompt
-        </label>
-        <textarea
-          id="prompt"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Enter your code generation prompt. Be specific about requirements, language, and use cases."
-          rows={6}
-          className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-none transition-smooth"
-        />
-        <div className="mt-2 text-sm text-gray-600">
-          {prompt.length}/5000 characters
-        </div>
-      </div>
+    <Card className="border-white/10 bg-card/90 shadow-2xl shadow-black/30">
+      <CardHeader>
+        <CardTitle>Prompt Workspace</CardTitle>
+        <CardDescription>
+          The code model generates the code; the crew verifies, detects hallucinations, and applies mitigation.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label htmlFor="prompt" className="text-sm font-medium">Generation prompt</label>
+            <Textarea
+              id="prompt"
+              value={prompt}
+              onChange={(event) => updatePrompt(event.target.value)}
+              placeholder="Write a function for fibonacci series"
+              rows={12}
+              className="mt-2 resize-none border-white/10 bg-black/30 text-base leading-7 shadow-inner shadow-black/30 placeholder:text-muted-foreground/70"
+            />
+            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+              <span>Language, framework, runtime, and checks are inferred by the agentic pipeline.</span>
+              <span>{prompt.length}/5000</span>
+            </div>
+          </div>
 
-      {/* Language Selection */}
-      <div>
-        <label htmlFor="language" className="block text-sm font-medium text-gray-900 mb-2">
-          Programming Language
-        </label>
-        <select
-          id="language"
-          value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          className="w-full px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-none transition-smooth"
-        >
-          {LANGUAGES.map((lang) => (
-            <option key={lang.value} value={lang.value}>
-              {lang.label}
-            </option>
-          ))}
-        </select>
-      </div>
+          {validationError && (
+            <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{validationError}</span>
+            </div>
+          )}
 
-      {/* Risk Level Selection */}
-      <div>
-        <label className="block text-sm font-medium text-gray-900 mb-3">
-          Verification Strictness
-        </label>
-        <div className="space-y-2">
-          {RISK_LEVELS.map((level) => (
-            <label key={level.value} className="flex items-center cursor-pointer">
-              <input
-                type="radio"
-                name="riskLevel"
-                value={level.value}
-                checked={riskLevel === level.value}
-                onChange={(e) => setRiskLevel(e.target.value)}
-                className="w-4 h-4 text-primary border-gray-300 focus:ring-primary"
-              />
-              <span className="ml-3 text-sm text-gray-700">{level.label}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Error Message */}
-      {validationError && (
-        <div className="flex items-start p-4 bg-red-50 border border-red-200 rounded-lg">
-          <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
-          <div className="text-sm text-red-800">{validationError}</div>
-        </div>
-      )}
-
-      {/* Submit Button */}
-      <button
-        type="submit"
-        disabled={mutation.isPending}
-        className="w-full px-6 py-3 bg-primary text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-smooth flex items-center justify-center gap-2"
-      >
-        {mutation.isPending && <Loader className="w-4 h-4 animate-spin" />}
-        {mutation.isPending ? 'Creating verification run...' : 'Start Verification'}
-      </button>
-
-      {/* Info Text */}
-      <p className="text-sm text-gray-600 text-center">
-        Your code will be verified by 9 AI agents for hallucinations and potential issues.
-      </p>
-    </form>
+          <Button type="submit" disabled={mutation.isPending} className="h-11 w-full bg-blue-500 text-base font-semibold text-white shadow-lg shadow-blue-950/40 hover:bg-blue-400">
+            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            {mutation.isPending ? 'Creating run...' : 'Start orchestration'}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   )
 }

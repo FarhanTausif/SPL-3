@@ -5,9 +5,12 @@
  */
 
 export type WSMessageType =
+  | 'run.snapshot'
   | 'run.started'
   | 'run.updated'
   | 'run.completed'
+  | 'run.failed'
+  | 'stage.updated'
   | 'agent.started'
   | 'agent.updated'
   | 'agent.completed'
@@ -23,7 +26,7 @@ export interface WSMessage<T = any> {
 }
 
 export interface RunUpdateData {
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'needs_clarification' | 'completed' | 'failed';
   stage?: string;
   progress?: number;
   elapsedSeconds?: number;
@@ -239,7 +242,19 @@ let wsClient: WebSocketClient | null = null;
 
 export function getWebSocketClient(): WebSocketClient {
   if (!wsClient) {
-    const baseUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+    const configuredBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    let baseUrl = configuredBaseUrl;
+    if (typeof window !== 'undefined') {
+      try {
+        const parsed = new URL(configuredBaseUrl);
+        if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+          parsed.hostname = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
+          baseUrl = parsed.toString().replace(/\/$/, '');
+        }
+      } catch {
+        baseUrl = configuredBaseUrl;
+      }
+    }
     // Convert http/https to ws/wss
     const wsUrl = baseUrl.replace(/^http/, 'ws');
     wsClient = new WebSocketClient(wsUrl);

@@ -26,7 +26,7 @@ export function useRunStatus(runId: string | null, enabled = true) {
   useEffect(() => {
     if (query.data) {
       setCurrentRun(query.data)
-      setPollActive(query.data.status === 'queued' || query.data.status === 'started')
+      setPollActive(query.data.status === 'queued' || query.data.status === 'running')
     }
   }, [query.data, setCurrentRun, setPollActive])
 
@@ -53,6 +53,7 @@ export function useRunEvidence(runId: string | null) {
       return runApi.getRunEvidence(runId)
     },
     enabled: !!runId,
+    refetchInterval: 2500,
     retry: 3,
   })
 
@@ -77,6 +78,7 @@ export function useRunEvents(runId: string | null) {
       return runApi.getRunEvents(runId)
     },
     enabled: !!runId,
+    refetchInterval: 2500,
     retry: 3,
   })
 

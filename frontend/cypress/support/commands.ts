@@ -13,7 +13,7 @@ Cypress.Commands.add('enterPrompt', (text: string) => {
 })
 
 Cypress.Commands.add('selectLanguage', (language: string) => {
-  cy.get('select').first().select(language)
+  cy.log(`Language is inferred from prompt; requested helper value was ${language}`)
 })
 
 Cypress.Commands.add('startVerification', () => {
