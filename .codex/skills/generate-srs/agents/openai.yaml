@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate SRS"
+  short_description: "Draft concise academic SRS documents"
+  default_prompt: "Use $generate-srs to create a concise SRS document for my software project."
