@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: dehalu
+      POSTGRES_USER: dehalu
+      POSTGRES_PASSWORD: dehalu
+    ports:
+      - "5433:5432"
+    volumes:
+      - dehalu_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dehalu -d dehalu"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dehalu_postgres:
