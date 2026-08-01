@@ -1,0 +1,4 @@
+interface:
+  display_name: "DeHalu Verification"
+  short_description: "Build static hallucination detection."
+  default_prompt: "Use this skill to implement or update DeHalu claim extraction, static analysis, symbol indexing, metrics, judge pool, CoVe, and policy logic."

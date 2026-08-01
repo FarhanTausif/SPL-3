@@ -1,0 +1,4 @@
+interface:
+  display_name: "DeHalu Database"
+  short_description: "Build DeHalu persistence and ERD schema."
+  default_prompt: "Use this skill to implement or update DeHalu database models, migrations, repositories, and evidence persistence."

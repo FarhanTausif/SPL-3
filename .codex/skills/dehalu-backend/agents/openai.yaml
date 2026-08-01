@@ -1,0 +1,4 @@
+interface:
+  display_name: "DeHalu Backend"
+  short_description: "Build DeHalu backend pipeline features."
+  default_prompt: "Use this skill to implement or update DeHalu backend orchestration, verification, judging, repair, and API behavior."

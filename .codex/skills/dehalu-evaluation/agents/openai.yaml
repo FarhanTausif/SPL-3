@@ -1,0 +1,4 @@
+interface:
+  display_name: "DeHalu Evaluation"
+  short_description: "Evaluate DeHalu hallucination detection."
+  default_prompt: "Use this skill to design or update DeHalu evaluation cases, metrics reports, and academic validation artifacts."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "DeHalu Frontend"
+  short_description: "Build DeHalu frontend workflow UI."
+  default_prompt: "Use this skill to implement or update DeHalu frontend prompt intake, workflow monitoring, evidence, metrics, and result views."
