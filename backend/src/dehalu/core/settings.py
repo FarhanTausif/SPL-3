@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import os
+from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    for path in [Path.cwd() / ".env", Path.cwd().parent / ".env"]:
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            clean = line.strip()
+            if not clean or clean.startswith("#") or "=" not in clean:
+                continue
+            key, value = clean.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
+
+
+@dataclass(frozen=True)
+class Settings:
+    app_name: str = "DeHalu"
+    database_url: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://dehalu:dehalu@localhost:5433/dehalu",
+    )
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_model: str = os.getenv("OLLAMA_MODEL", "codellama:7b")
+    gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
+    groq_api_key: str | None = os.getenv("GROQ_API_KEY")
+    mistral_api_key: str | None = os.getenv("MISTRAL_API_KEY")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    mistral_model: str = os.getenv("MISTRAL_MODEL", "mistral-large-latest")
+    allow_fake_llm: bool = os.getenv("DEHALU_ALLOW_FAKE_LLM", "false").lower() == "true"
+    default_max_retry: int = int(os.getenv("DEHALU_MAX_RETRY", "1"))
+    request_timeout_seconds: float = float(os.getenv("DEHALU_REQUEST_TIMEOUT_SECONDS", "45"))
+    cors_origins: tuple[str, ...] = tuple(
+        origin.strip()
+        for origin in os.getenv("DEHALU_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+        if origin.strip()
+    )
+    cors_origin_regex: str = os.getenv(
+        "DEHALU_CORS_ORIGIN_REGEX",
+        r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?",
+    )
+
+
+settings = Settings()

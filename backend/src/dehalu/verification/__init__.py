@@ -1,0 +1,2 @@
+"""Execution-free verification components."""
+
