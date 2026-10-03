@@ -51,6 +51,32 @@ export type RunEvidence = {
   attempts: AttemptEvidence[];
 };
 
+export type WorkflowStageKey =
+  | "intake"
+  | "clarification"
+  | "generation"
+  | "claim_extraction"
+  | "tree_sitter"
+  | "semgrep"
+  | "symbol_indexer"
+  | "metrics"
+  | "judge_pool"
+  | "consensus"
+  | "cove"
+  | "policy"
+  | "repair";
+
+export type StageStatus = "pending" | "running" | "done" | "failed";
+
+export type RunStreamEvent =
+  | { type: "run_created"; run_id: string; inferred: InferenceResult; model_name?: string }
+  | { type: "clarification"; run: RunSummary }
+  | { type: "stage"; stage: WorkflowStageKey; status: StageStatus; progress: number; attempt_no?: number }
+  | { type: "token"; attempt_no: number; text: string }
+  | { type: "attempt_completed"; attempt: AttemptEvidence }
+  | { type: "run_completed"; run: RunSummary; evidence: RunEvidence }
+  | { type: "error"; message: string };
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export async function createRun(payload: { prompt: string; language_hint?: string; max_retry: number; constraints: string[] }) {
@@ -71,4 +97,47 @@ export async function getEvidence(runId: string) {
     throw new Error(await response.text());
   }
   return (await response.json()) as RunEvidence;
+}
+
+export async function streamRun(
+  payload: { prompt: string; constraints?: string[] },
+  onEvent: (event: RunStreamEvent) => void
+) {
+  const response = await fetch(`${API_BASE}/api/runs/stream`, {
+    method: "POST",
+    headers: { accept: "text/event-stream", "content-type": "application/json" },
+    body: JSON.stringify({ prompt: payload.prompt, constraints: payload.constraints ?? [] })
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(await response.text());
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const payloadLines = frame
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim());
+      if (payloadLines.length === 0) continue;
+      onEvent(JSON.parse(payloadLines.join("\n")) as RunStreamEvent);
+    }
+  }
+
+  if (buffer.trim()) {
+    const data = buffer
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .join("\n");
+    if (data) onEvent(JSON.parse(data) as RunStreamEvent);
+  }
 }
