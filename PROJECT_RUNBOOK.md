@@ -19,6 +19,7 @@ OLLAMA_MODEL=qwen2.5-coder:1.5b
 GEMINI_API_KEY=...
 GROQ_API_KEY=...
 MISTRAL_API_KEY=...
+DEHALU_MAX_RETRY=3
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 DEHALU_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 DEHALU_CORS_ORIGIN_REGEX=https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?
@@ -44,6 +45,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[test]"
 alembic upgrade head
+kill -9 $(lsof -t -i :8000) # kill any existing backend process 
 uvicorn dehalu.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 

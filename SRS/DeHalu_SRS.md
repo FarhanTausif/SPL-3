@@ -282,49 +282,82 @@ flowchart TD
 
 #### 3.4 Detection Use Case Diagram
 
-The detection use case diagram focuses on the execution-free hallucination detection workflow before any repair action is triggered.
+The detection use case diagram breaks the detection module into the main user-visible and system-internal use cases required to identify hallucination evidence before mitigation starts.
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#000000", "primaryTextColor": "#111111", "lineColor": "#111111", "fontFamily": "Arial"}}}%%
 flowchart LR
     User((User))
-    LocalModel[Local CodeLLM Provider]
-    StaticAnalyzers[Static Analyzers]
-    SymbolIndex[Package / Symbol Index]
-    JudgePool[Judge Pool]
 
-    subgraph Detection[DeHalu Detection Module]
-        DUC1[Submit Programming Prompt]
-        DUC2[Generate Initial Code]
-        DUC3[Log Generation Metrics]
-        DUC4[Extract Checkable Claims]
-        DUC5[Parse Syntax and AST]
-        DUC6[Run Static Rules]
-        DUC7[Validate Packages and APIs]
-        DUC8[Calculate Hallucination Metrics]
-        DUC9[Evaluate Semantic Correctness]
-        DUC10[Aggregate Judge Consensus]
-        DUC11[Make Detection Verdict]
+    subgraph IntakeColumn[" "]
+        direction TB
+        Submit([Submit Prompt])
+        Generate([Generate Code])
+        Extract([Extract Claims])
+
+        Submit --> Generate
+        Generate --> Extract
     end
 
-    User --> DUC1
-    DUC1 --> DUC2
-    DUC2 --> LocalModel
-    DUC2 --> DUC3
-    DUC2 --> DUC4
-    DUC4 --> DUC5
-    DUC4 --> DUC6
-    DUC4 --> DUC7
-    DUC5 --> StaticAnalyzers
-    DUC6 --> StaticAnalyzers
-    DUC7 --> SymbolIndex
-    DUC5 --> DUC8
-    DUC6 --> DUC8
-    DUC7 --> DUC8
-    DUC8 --> DUC9
-    DUC9 --> JudgePool
-    JudgePool --> DUC10
-    DUC10 --> DUC11
-    DUC11 --> User
+    subgraph StaticDetectionColumn[" "]
+        direction TB
+        Parse([Parse Syntax and AST])
+        StaticRules([Run Static Rules])
+        SymbolCheck([Validate Packages and APIs])
+
+        Parse --> StaticRules
+        StaticRules --> SymbolCheck
+    end
+
+    subgraph SemanticDetectionColumn[" "]
+        direction TB
+        Metrics([Calculate Hallucination Metrics])
+        Judge([Evaluate Semantic Correctness])
+        CoVe([Run Chain-of-Verification])
+        Verdict([Make Detection Verdict])
+        Review([Review Evidence])
+
+        Metrics --> Judge
+        Judge --> CoVe
+        CoVe --> Verdict
+        Verdict --> Review
+    end
+
+    subgraph DetectionProviders[" "]
+        direction TB
+        LocalModel(Local CodeLLM<br/>Provider)
+        StaticAnalyzers(Static Analyzers)
+        SymbolIndex(Package / Symbol<br/>Index)
+        JudgePool(Judge Pool)
+
+        LocalModel ~~~ StaticAnalyzers
+        StaticAnalyzers ~~~ SymbolIndex
+        SymbolIndex ~~~ JudgePool
+    end
+
+    User -.-> Submit
+    User -.-> Review
+    Extract --> Parse
+    SymbolCheck --> Metrics
+    Generate --- LocalModel
+    Parse --- StaticAnalyzers
+    StaticRules --- StaticAnalyzers
+    SymbolCheck --- SymbolIndex
+    Judge --- JudgePool
+
+    classDef actor fill:#dbeafe,stroke:#5f83b5,stroke-width:2px,color:#111111;
+    classDef usecase fill:#fff1c7,stroke:#b08a00,stroke-width:2px,color:#111111;
+    classDef external fill:#d8e7fb,stroke:#5f83b5,stroke-width:2px,color:#111111;
+
+    class User actor;
+    class Submit,Generate,Extract,Parse,StaticRules,SymbolCheck,Metrics,Judge,CoVe,Verdict,Review usecase;
+    class LocalModel,StaticAnalyzers,SymbolIndex,JudgePool external;
+    style IntakeColumn fill:#000000,stroke:#000000,color:#000000;
+    style StaticDetectionColumn fill:#000000,stroke:#000000,color:#000000;
+    style SemanticDetectionColumn fill:#000000,stroke:#000000,color:#000000;
+    style DetectionProviders fill:#000000,stroke:#000000,color:#000000;
+
+    linkStyle default stroke:#111111,stroke-width:2px;
 ```
 
 #### 3.5 Detection Activity Diagram
@@ -365,39 +398,81 @@ flowchart TD
 
 #### 3.6 Mitigation Use Case Diagram
 
-The mitigation use case diagram focuses on what happens after the detection module finds unsupported, unsafe, or uncertain claims that require repair.
+The mitigation use case diagram breaks the repair loop into evidence preparation, constrained repair, re-verification, retry control, and result-return use cases.
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#000000", "primaryTextColor": "#111111", "lineColor": "#111111", "fontFamily": "Arial"}}}%%
 flowchart LR
     User((User))
-    DetectionModule[Detection Module]
-    LocalModel[Local CodeLLM Provider]
-    StaticAnalyzers[Static Analyzers]
 
-    subgraph Mitigation[DeHalu Mitigation Module]
-        MUC1[Receive Detection Findings]
-        MUC2[Build Failure Context]
-        MUC3[Generate Verification Questions]
-        MUC4[Convert Findings into CoVe Facts]
-        MUC5[Repair Hallucinated Code]
-        MUC6[Re-run Static Verification]
-        MUC7[Recalculate Metrics]
-        MUC8[Apply Repair Policy]
-        MUC9[Return Repaired or Rejected Result]
+    subgraph EvidencePreparationColumn[" "]
+        direction TB
+        Receive([Receive Detection Findings])
+        Build([Build Failure Context])
+        Questions([Generate Verification Questions])
+        Facts([Convert Findings to CoVe Facts])
+
+        Receive --> Build
+        Build --> Questions
+        Questions --> Facts
     end
 
-    DetectionModule --> MUC1
-    MUC1 --> MUC2
-    MUC2 --> MUC3
-    MUC3 --> MUC4
-    MUC4 --> MUC5
-    MUC5 --> LocalModel
-    MUC5 --> MUC6
-    MUC6 --> StaticAnalyzers
-    MUC6 --> MUC7
-    MUC7 --> MUC8
-    MUC8 --> MUC9
-    MUC9 --> User
+    subgraph RepairColumn[" "]
+        direction TB
+        RepairPrompt([Create Repair Prompt])
+        Repair([Repair Hallucinated Code])
+        Reverify([Re-run Static Verification])
+
+        RepairPrompt --> Repair
+        Repair --> Reverify
+    end
+
+    subgraph PolicyColumn[" "]
+        direction TB
+        Metrics([Recalculate Metrics])
+        Compare([Compare Attempts])
+        Policy([Apply Repair Policy])
+        Retry([Control Repair Retry])
+        Return([Return Repaired or Rejected Result])
+
+        Metrics --> Compare
+        Compare --> Policy
+        Policy --> Retry
+        Retry --> Return
+    end
+
+    subgraph MitigationProviders[" "]
+        direction TB
+        LocalModel(Local CodeLLM<br/>Provider)
+        StaticAnalyzers(Static Analyzers)
+        JudgeEvidence(Judge / CoVe<br/>Evidence)
+
+        LocalModel ~~~ StaticAnalyzers
+        StaticAnalyzers ~~~ JudgeEvidence
+    end
+
+    User -.-> Receive
+    Return -.-> User
+    Facts --> RepairPrompt
+    Reverify --> Metrics
+    Retry -.-> Build
+    Repair --- LocalModel
+    Reverify --- StaticAnalyzers
+    Facts --- JudgeEvidence
+
+    classDef actor fill:#dbeafe,stroke:#5f83b5,stroke-width:2px,color:#111111;
+    classDef usecase fill:#fff1c7,stroke:#b08a00,stroke-width:2px,color:#111111;
+    classDef external fill:#d8e7fb,stroke:#5f83b5,stroke-width:2px,color:#111111;
+
+    class User actor;
+    class Receive,Build,Questions,Facts,RepairPrompt,Repair,Reverify,Metrics,Compare,Policy,Retry,Return usecase;
+    class LocalModel,StaticAnalyzers,JudgeEvidence external;
+    style EvidencePreparationColumn fill:#000000,stroke:#000000,color:#000000;
+    style RepairColumn fill:#000000,stroke:#000000,color:#000000;
+    style PolicyColumn fill:#000000,stroke:#000000,color:#000000;
+    style MitigationProviders fill:#000000,stroke:#000000,color:#000000;
+
+    linkStyle default stroke:#111111,stroke-width:2px;
 ```
 
 #### 3.7 Mitigation Activity Diagram
@@ -447,7 +522,7 @@ flowchart TD
 | generated_outputs | id (PK), run_id (FK), attempt_no, code, explanation, provider, entropy_summary, logprob_summary |
 | claims | id (PK), output_id (FK), claim_type, claim_text, location, status |
 | static_findings | id (PK), output_id (FK), rule_id, severity, message, location, evidence_source |
-| metric_results | id (PK), output_id (FK), mihn, mahr, tr_s, entropy_score, overall_score |
+| metric_results | id (PK), output_id (FK), mihn, mahr, tr_s, entropy_score, hallucination_risk_score |
 | judge_results | id (PK), output_id (FK), judge_name, judge_model, verdict, score, rubric_json, explanation, created_at |
 | judge_consensus | id (PK), output_id (FK), final_verdict, average_score, agreement_level, summary |
 | cove_results | id (PK), output_id (FK), claim_id (FK), verdict, evidence, confidence |
@@ -528,7 +603,7 @@ erDiagram
         float mahr
         float tr_s
         float entropy_score
-        float overall_score
+        float hallucination_risk_score
     }
 
     JUDGE_RESULTS {
@@ -581,64 +656,356 @@ erDiagram
 | Package/API index evidence | Structured lookup results | Validate whether packages and APIs exist | Normalize package, symbol, version, and status | External lookup may reveal dependency names if online lookup is used |
 | Judge and CoVe outputs | Structured JSON verdicts | Evaluate requirement alignment and claim support | Validate schema and normalize scores | May repeat code or prompt content; store with access control |
 
-### 5. AI Engineering Design
+### 5. AI Engineering
 
 #### 5.1 AI Pipeline
 
 ```mermaid
-flowchart LR
-    Prompt[User Prompt]
-    Normalize[Prompt Normalization]
-    Generate[Local CodeLLM Generation]
+flowchart TD
+    Prompt[User Programming Prompt]
+    Intake[Prompt Intake and Constraint Inference]
+    Clarify{Blocking ambiguity?}
+    Assumptions[Record uncertain assumptions]
+    Generate[Local CodeLLM Code Generation]
     Claims[Claim Extraction]
-    Static[Static Analysis]
-    Tools[Package and API Validation]
-    Metrics[Metric Engine]
-    JudgePool[LLM-as-a-Judge Pool]
+    Static[Execution-Free Static Detection]
+    Metrics[Quantitative Metric Engine]
+    Judges[Three-Judge Semantic Evaluation]
     Consensus[Judge Consensus]
     CoVe[Chain-of-Verification]
-    Policy[Policy Decision]
-    Repair[Repair Agent]
-    Output[Final Code and Evidence]
+    Policy{Policy Gateway}
+    Repair[Evidence-Constrained Repair Agent]
+    Final[Final Code and Evidence Report]
 
-    Prompt --> Normalize --> Generate --> Claims
-    Claims --> Static
-    Claims --> Tools
-    Static --> Metrics
-    Tools --> Metrics
-    Metrics --> JudgePool --> Consensus --> CoVe --> Policy
-    Policy -->|accept / warn / reject| Output
-    Policy -->|repair| Repair --> Claims
+    Prompt --> Intake --> Clarify
+    Clarify -->|Yes| Final
+    Clarify -->|No| Assumptions --> Generate --> Claims --> Static --> Metrics
+    Metrics --> Judges --> Consensus --> CoVe --> Policy
+    Policy -->|accept / warn / reject| Final
+    Policy -->|repair allowed| Repair --> Claims
 ```
 
-The metric engine does not act as the only decision maker. It quantifies hallucination evidence, ranks severity, correlates static failures with generation uncertainty where available, supports the policy gateway, and measures whether repair reduces risk across repeated attempts.
+The AI pipeline is designed as an evidence-first verification gateway. The local CodeLLM is used for generation and repair, while deterministic static analyzers and symbol validators provide primary evidence for syntax, dependency, API, reference, safety, and code-quality findings. LLM judges provide semantic review for requirement alignment, functional logic, unsupported assumptions, and quality/safety interpretation. The policy gateway combines all evidence and controls whether code is accepted, warned, rejected, or repaired.
 
-#### 5.2 Model Selection
+#### 5.2 Models and AI Components
 
-| Component | Candidate / Choice | Reason |
+| Component | Model / Tool Choice | Responsibility |
 | --- | --- | --- |
-| Code Generator | Local 3B-7B parameter CodeLLM through Ollama or equivalent local runtime | Fits student-budget hardware and supports privacy-preserving local generation. |
-| Judge Pool | At least three structured judges using strong local or optional external models during evaluation | Separate judge roles can assess requirement alignment, functional logic, and code quality or safety while deterministic evidence remains primary. |
-| Judge Consensus | Aggregation policy over individual judge results | Produces final semantic verdict, average score, and agreement level for the policy gateway. |
-| Repair Agent | Same local CodeLLM with strict repair prompt | Keeps mitigation parameter-free and avoids separate model training. |
-| Static Parser | Tree-sitter or language-specific AST parser | Enables execution-free syntax and structure analysis across languages. |
-| SAST Rules | Semgrep or equivalent static rule engine | Detects structural, security, and unsafe-code patterns without executing code. |
-| Symbol Indexer | Language-specific symbol indexer with generic fallback | Supports static detection of API knowledge conflicts and invalid reference errors in a language-agnostic architecture. |
+| Prompt Intake Agent | Structured LLM prompt or deterministic parser with LLM fallback | Infer language, framework, runtime, libraries, task requirements, blocking ambiguities, and uncertain assumptions. |
+| Code Generator | Local CodeLLM through Ollama or equivalent local runtime | Produce initial code from the normalized programming task while declaring assumptions and dependencies. |
+| Static Parser | Tree-sitter or language-specific AST parser | Detect syntax violations, malformed structures, incomplete code blocks, and parse-level code smells without execution. |
+| SAST Analyzer | Semgrep or equivalent static rule engine | Detect unsafe operations, resource mishandling, security patterns, and maintainability smells. |
+| Symbol/API Validator | Language-specific symbol indexer, package metadata, framework metadata, and generic fallback | Detect fake imports, unresolved symbols, invented APIs, invalid references, and unverifiable dependency claims. |
+| Metric Engine | Deterministic metric calculator | Compute MiHN, MaHR, TR-S, entropy/log-prob uncertainty score when available, static severity score, and hallucination risk score. |
+| Judge Pool | Gemini, Groq, and Mistral or equivalent independent judge models | Each judge evaluates the same rubric: requirement alignment, functional logic, quality/safety, dependency/API plausibility, unsupported assumptions, and hallucination risk. |
+| Consensus Aggregator | Deterministic aggregation policy | Combine three judge outputs into final semantic verdict, average score, agreement level, and explanation. |
+| CoVe Verifier | Claim-level verification prompt plus static/tool evidence | Convert extracted claims into verification questions and classify each claim as supported, unsupported, or uncertain. |
+| Repair Agent | Local CodeLLM with constrained mitigation prompt | Repair only evidence-supported failures, avoid unsupported dependencies, preserve valid behavior, and return revised code for re-verification. |
 
-#### 5.3 Prompt Design
+#### 5.3 Prompt Engineering
 
-| Prompt / Agent | Inputs | Expected Output | Constraints |
-| --- | --- | --- | --- |
-| Normalization Prompt | User prompt | Inferred language, framework, runtime, constraints, uncertainty flags | Must not invent unstated requirements as facts. |
-| Code Generation Prompt | Normalized task | Code, assumptions, dependencies, brief explanation | Must separate code from assumptions and avoid unsupported package claims. |
-| Requirement Judge Prompt | Prompt, generated code, claims, static findings, metrics | Requirement-alignment score and deviation findings | Must compare implementation behavior against the original user request. |
-| Functional Logic Judge Prompt | Prompt, generated code, claims, static findings, metrics | Functional correctness score and logical-flow findings | Must identify likely incorrect logic without executing generated code. |
-| Quality and Safety Judge Prompt | Prompt, generated code, claims, static findings, metrics | Code quality, resource-use, and safety findings | Must use static evidence where available and mark uncertain findings clearly. |
-| Judge Consensus Prompt | Individual judge outputs | Final semantic verdict, average score, agreement level, and summary | Must aggregate judge results without overriding deterministic static failures. |
-| CoVe Prompt | Extracted claims and evidence | Claim-level supported, unsupported, or uncertain verdicts | Must verify claims against evidence rather than model confidence alone. |
-| Repair Prompt | Failed code and evidence-backed failure context | Repaired code and repair explanation | Must only fix evidence-supported issues and avoid adding new unsupported dependencies. |
+All AI prompts shall use explicit role instructions, bounded inputs, structured output schemas, and evidence-grounding rules. The system shall validate model outputs against the expected schema before storing or using them. If a model response is malformed, the system shall retry with a schema-repair instruction or mark the result as uncertain.
 
-#### 5.4 Evaluation and Validation Method
+##### 5.3.1 Prompt Intake and Constraint Inference
+
+**System Prompt**
+
+```text
+You are DeHalu's prompt intake analyst. Extract only information supported by the user request.
+Do not invent requirements, libraries, frameworks, runtime versions, files, APIs, or deployment assumptions.
+Return valid JSON only.
+```
+
+**User Prompt Template**
+
+```text
+Analyze the programming request below.
+
+USER_REQUEST:
+{user_prompt}
+
+Return JSON with:
+{
+  "language": "string|null",
+  "framework": "string|null",
+  "runtime": "string|null",
+  "libraries": ["string"],
+  "task_requirements": ["string"],
+  "constraints": ["string"],
+  "uncertain_assumptions": ["string"],
+  "blocking_questions": ["string"],
+  "needs_clarification": true|false
+}
+
+Rules:
+- Use needs_clarification=true only when missing information blocks meaningful generation or verification.
+- If a language, framework, runtime, or library is likely but not explicit, place it in uncertain_assumptions.
+- Keep each blocking question specific and answerable.
+- Do not convert assumptions into facts.
+```
+
+##### 5.3.2 Code Generation Prompt
+
+**System Prompt**
+
+```text
+You are DeHalu's local CodeLLM generation agent. Generate implementation code that directly satisfies the normalized task.
+Prefer standard library features when possible. Do not introduce obscure packages, fake dependencies, or APIs that are not necessary.
+If an assumption is required, state it separately from the code. Return one fenced code block and a short JSON metadata block.
+```
+
+**User Prompt Template**
+
+````text
+NORMALIZED_TASK:
+{task_requirements}
+
+INFERRED_CONTEXT:
+- language: {language}
+- framework: {framework}
+- runtime: {runtime}
+- allowed_libraries: {libraries}
+- constraints: {constraints}
+- uncertain_assumptions: {uncertain_assumptions}
+
+Generate code for the task.
+
+Output format:
+```{language}
+<code>
+```
+{
+  "assumptions": ["string"],
+  "dependencies": ["string"],
+  "entry_points": ["string"],
+  "limitations": ["string"]
+}
+
+Generation rules:
+- Do not claim that a dependency, API, symbol, or runtime feature exists unless it is standard or explicitly required.
+- If a dependency is optional, mark it as optional in the metadata.
+- Keep code complete enough for static parsing.
+- Avoid unsafe file, shell, network, credential, or destructive operations unless explicitly required by the task.
+````
+
+##### 5.3.3 Claim Extraction Prompt
+
+Claim extraction may be performed by deterministic parsers, LLM extraction, or a hybrid method. The extraction prompt shall convert generated code and explanation into verifiable claims.
+
+```text
+You are DeHalu's claim extraction agent. Extract only concrete claims that can be checked without executing the code.
+Return valid JSON only.
+
+INPUT_CODE:
+{generated_code}
+
+INPUT_EXPLANATION:
+{generation_explanation}
+
+Return:
+{
+  "claims": [
+    {
+      "claim_type": "import|package|api|symbol|parameter|runtime|behavior|assumption|safety",
+      "claim_text": "string",
+      "location": "line number, symbol name, or explanation section",
+      "check_method": "tree_sitter|semgrep|symbol_indexer|package_index|judge|cove",
+      "initial_status": "not_checked"
+    }
+  ]
+}
+
+Rules:
+- Split compound claims into smaller checkable claims.
+- Include claims from comments and explanations only when they assert behavior, dependency, runtime, or safety facts.
+- Do not decide whether a claim is true in this step.
+```
+
+##### 5.3.4 LLM-as-a-Judge Pool Prompt
+
+Each judge receives the same task and rubric. The three judges shall be independent model calls so disagreement can be measured.
+
+**System Prompt**
+
+```text
+You are an independent DeHalu judge for generated code. Evaluate the code using only the supplied prompt, code, extracted claims, static findings, symbol/API evidence, and metrics.
+Do not execute code. Do not assume missing dependencies are valid. Deterministic static findings must be treated as stronger evidence than model intuition.
+Return valid JSON only.
+```
+
+**User Prompt Template**
+
+```text
+USER_REQUEST:
+{user_prompt}
+
+GENERATED_CODE:
+{generated_code}
+
+EXTRACTED_CLAIMS:
+{claims_json}
+
+STATIC_AND_SYMBOL_FINDINGS:
+{findings_json}
+
+METRICS:
+{metrics_json}
+
+Evaluate these categories from 0.0 to 1.0:
+1. requirement_alignment: Does the code implement the requested task?
+2. functional_logic: Is the static logical flow plausible and complete?
+3. quality_safety: Are resource use, security posture, and code quality acceptable?
+4. dependency_api_plausibility: Are packages, imports, symbols, and APIs plausible based on evidence?
+5. unsupported_assumptions: Does the code rely on unstated or unverifiable assumptions?
+6. hallucination_risk: Overall risk that the code contains hallucinated functionality, APIs, symbols, or behavior.
+
+Return:
+{
+  "verdict": "pass|warn|fail",
+  "score": 0.0,
+  "rubric_json": {
+    "requirement_alignment": {"score": 0.0, "evidence": ["string"]},
+    "functional_logic": {"score": 0.0, "evidence": ["string"]},
+    "quality_safety": {"score": 0.0, "evidence": ["string"]},
+    "dependency_api_plausibility": {"score": 0.0, "evidence": ["string"]},
+    "unsupported_assumptions": {"score": 0.0, "evidence": ["string"]},
+    "hallucination_risk": {"score": 0.0, "evidence": ["string"]}
+  },
+  "hallucination_types": ["syntax_violation|incomplete_code|api_knowledge_conflict|invalid_reference|incorrect_logical_flow|requirement_deviation|resource_mishandling|security_vulnerability|code_smell"],
+  "blocking_issues": ["string"],
+  "repair_suggestions": ["string"],
+  "explanation": "short evidence-grounded explanation"
+}
+
+Scoring anchors:
+- pass: no blocking static evidence and only minor or no uncertainty.
+- warn: usable code with uncertain assumptions, non-blocking quality issues, or judge disagreement.
+- fail: unsupported dependency/API/symbol, syntax failure, major requirement deviation, unsafe behavior, or severe logical flaw.
+```
+
+##### 5.3.5 Chain-of-Verification Prompt
+
+The CoVe stage shall transform claims and findings into targeted verification questions. It shall not rely on the generator's confidence.
+
+```text
+You are DeHalu's Chain-of-Verification verifier. Verify each claim against supplied evidence.
+Use supported only when evidence directly confirms the claim. Use unsupported when evidence contradicts it.
+Use uncertain when evidence is incomplete.
+Return valid JSON only.
+
+CLAIMS:
+{claims_json}
+
+EVIDENCE:
+{static_findings_json}
+{symbol_api_evidence_json}
+{metric_summary_json}
+{judge_consensus_json}
+
+Return:
+{
+  "cove_results": [
+    {
+      "claim_id": "string",
+      "verification_question": "string",
+      "verdict": "supported|unsupported|uncertain",
+      "evidence": "string",
+      "confidence": 0.0
+    }
+  ]
+}
+
+Rules:
+- Do not mark a package, API, symbol, or behavior as supported without evidence.
+- Static contradiction must produce unsupported.
+- Missing evidence for an important claim must produce uncertain, not supported.
+```
+
+##### 5.3.6 Evidence-Constrained Repair Prompt
+
+The repair prompt shall use Chain-of-Thought-style structured planning internally, but the model shall not expose private reasoning. The returned repair must be rechecked by the full pipeline.
+
+**System Prompt**
+
+```text
+You are DeHalu's code repair agent. Repair generated code using only evidence-supported failures.
+Think through the repair plan internally. Do not reveal hidden reasoning. Return valid JSON and one fenced code block.
+Do not add new dependencies unless the original prompt requires them or the evidence proves they are valid.
+Preserve correct behavior that is unrelated to the findings.
+```
+
+**User Prompt Template**
+
+````text
+ORIGINAL_USER_REQUEST:
+{user_prompt}
+
+NORMALIZED_CONTEXT:
+{inference_json}
+
+FAILED_ATTEMPT_NUMBER:
+{attempt_no}
+
+FAILED_CODE:
+```{language}
+{failed_code}
+```
+
+STATIC_FINDINGS:
+{static_findings_json}
+
+JUDGE_CONSENSUS:
+{judge_consensus_json}
+
+COVE_RESULTS:
+{cove_results_json}
+
+METRICS:
+{metrics_json}
+
+Repair task:
+1. Fix only issues supported by static findings, judge consensus, CoVe results, or metric evidence.
+2. Remove fake, unverifiable, or unnecessary dependencies.
+3. Replace invented APIs or undefined symbols with valid alternatives.
+4. Preserve the original user requirements.
+5. Avoid unsafe operations unless explicitly required.
+6. Return code that can pass claim extraction and static verification.
+
+Output format:
+{
+  "repair_summary": ["string"],
+  "fixed_evidence_ids": ["string"],
+  "remaining_uncertainties": ["string"],
+  "new_dependencies": ["string"]
+}
+```{language}
+<repaired_code>
+```
+````
+
+##### 5.3.7 Prompt Output Validation
+
+| Prompt Stage | Required Validation |
+| --- | --- |
+| Intake | JSON schema validation; `needs_clarification` must match blocking questions. |
+| Generation | Exactly one primary code block; metadata must separate dependencies and assumptions. |
+| Claim Extraction | Each claim must include type, text, location, and check method. |
+| Judge Pool | Verdict must be `pass`, `warn`, or `fail`; all rubric categories must be present. |
+| CoVe | Each claim must receive `supported`, `unsupported`, or `uncertain`. |
+| Repair | Repaired code must be present; repair summary must reference evidence-backed issues. |
+
+#### 5.4 Hallucination Metrics
+
+| Metric | Meaning | Use in Policy |
+| --- | --- | --- |
+| MiHN | Number of unsupported or invalid micro-level claims | Indicates absolute count of suspected hallucinations. |
+| MaHR | Ratio of unsupported or uncertain claims to total claims | Normalizes hallucination evidence across small and large outputs. |
+| TR-S | Structural repetition score | Detects repeated, degenerated, or template-looped code. |
+| Entropy Score | Token uncertainty or calibrated fallback uncertainty when model log-probabilities are available | Highlights unstable generation regions and supports before/after repair comparison. |
+| Static Severity Score | Weighted severity from parser, SAST, and symbol findings | Ensures deterministic static failures influence the policy gateway. |
+| Hallucination Risk Score | Combined risk score derived from claim, static, repetition, uncertainty, and judge signals | Provides a comparative risk indicator across attempts; it does not replace deterministic policy rules. |
+
+#### 5.5 Evaluation and Validation Method
 
 The system shall be evaluated using prompt cases that intentionally trigger common hallucination errors:
 
@@ -650,9 +1017,9 @@ The system shall be evaluated using prompt cases that intentionally trigger comm
 - Repetitive or degenerated code structures.
 - Unsafe operations not required by the prompt.
 
-Evaluation shall compare initial generated outputs against verified or repaired outputs using static findings, claim-level verdicts, metric changes, judge consensus, and final policy decisions. Metric changes shall be used to show whether repair reduced hallucination evidence, such as lower MiHN, MaHR, TR-S, or uncertainty-linked static failure scores.
+Evaluation shall compare initial generated outputs against verified or repaired outputs using static findings, claim-level verdicts, metric changes, judge consensus, and final policy decisions. Metric changes shall be used to show whether repair reduced hallucination evidence, such as lower MiHN, MaHR, TR-S, entropy-linked uncertainty, static severity, or hallucination risk score.
 
-#### 5.5 Safety and Privacy Controls
+#### 5.6 Safety and Privacy Controls
 
 - The committed verification flow shall not execute arbitrary generated code.
 - External package or API lookups shall be configurable so the system can run in local-only mode.
@@ -661,4 +1028,4 @@ Evaluation shall compare initial generated outputs against verified or repaired 
 
 ### 6. Completeness Check
 
-This SRS is based on the revised DeHalu proposal and the stated proposal feedback. It intentionally prioritizes an execution-free, static-analysis-centered verification scope. Existing repository files that mention sandbox execution should be treated as older or broader implementation notes unless the project scope is later changed. Database fields and tool choices are proposed at the SRS level and may be mapped to equivalent implementation names.
+This SRS is based on the revised DeHalu proposal and the stated proposal feedback. It prioritizes an execution-free, static-analysis-centered verification scope with structured AI prompting, judge-pool review, Chain-of-Verification, metric-based evidence reporting, and policy-controlled repair.
