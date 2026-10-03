@@ -4,14 +4,14 @@ from sqlalchemy.orm import Session
 
 from dehalu.api.schemas import AttemptEvidence, GeneratedOutput, PolicyDecision, RunCreate, RunEvidence, RunSummary
 from dehalu.core.settings import settings
-from dehalu.providers.llm import JudgePool, OllamaClient, build_judge_prompt
+from dehalu.providers.llm import JudgePool, OllamaClient, build_judge_prompt, extract_code_block
 from dehalu.state.repository import RunRepository, run_to_evidence, run_to_summary
 from dehalu.verification.claims import extract_claims
 from dehalu.verification.cove import run_cove
 from dehalu.verification.inference import infer_prompt
 from dehalu.verification.metrics import compute_metrics
 from dehalu.verification.policy import consensus_from_judges, decide_policy
-from dehalu.verification.static_analysis import run_static_analysis
+from dehalu.verification.static_analysis import run_static_analysis, run_static_analysis_by_stage
 from dehalu.verification.symbols import validate_symbols
 
 
@@ -72,6 +72,80 @@ class DeHaluPipeline:
         stored = self.repository.get_run(str(run.id))
         return run_to_summary(stored or run)
 
+    def stream_run(self, request: RunCreate):
+        yield _stage("intake", "running", 15)
+        inference = infer_prompt(request.prompt, request.language_hint, request.constraints)
+        run = self.repository.create_run(
+            request.prompt,
+            model_name=settings.ollama_model,
+            max_retry=request.max_retry,
+            inference=inference,
+        )
+        yield _stage("intake", "done", 100)
+        yield {"type": "run_created", "run_id": str(run.id), "inferred": inference, "model_name": settings.ollama_model}
+
+        if inference.needs_clarification:
+            yield _stage("clarification", "running", 15)
+            self.repository.save_clarification(run, "; ".join(inference.clarification_questions))
+            stored = self.repository.get_run(str(run.id)) or run
+            yield _stage("clarification", "done", 100)
+            yield {"type": "clarification", "run": run_to_summary(stored)}
+            return
+
+        prompt = self._generation_prompt(request.prompt, inference.model_dump())
+        code, explanation, entropy, logprob = yield from self._stream_llm_attempt(
+            prompt=prompt,
+            attempt_no=1,
+            stage="generation",
+            repair=False,
+        )
+        attempt = yield from self._evaluate_attempt_stream(
+            prompt=request.prompt,
+            language=inference.language or "generic",
+            attempt_no=1,
+            code=code,
+            explanation=explanation,
+            entropy=entropy,
+            logprob=logprob,
+            can_repair=request.max_retry > 0,
+        )
+        self.repository.save_attempt(run, attempt)
+        yield {"type": "attempt_completed", "attempt": attempt}
+
+        current_policy = attempt.policy
+        attempt_no = 1
+        while current_policy.decision == "repair" and attempt_no <= request.max_retry:
+            attempt_no += 1
+            repair_prompt = self._repair_prompt(request.prompt, attempt)
+            code, explanation, entropy, logprob = yield from self._stream_llm_attempt(
+                prompt=repair_prompt,
+                attempt_no=attempt_no,
+                stage="repair",
+                repair=True,
+            )
+            attempt = yield from self._evaluate_attempt_stream(
+                prompt=request.prompt,
+                language=inference.language or "generic",
+                attempt_no=attempt_no,
+                code=code,
+                explanation=explanation,
+                entropy=entropy,
+                logprob=logprob,
+                can_repair=attempt_no <= request.max_retry,
+            )
+            self.repository.save_attempt(run, attempt)
+            yield {"type": "attempt_completed", "attempt": attempt}
+            current_policy = attempt.policy
+
+        final_status = "completed" if current_policy.decision in {"accept", "warn"} else current_policy.decision
+        self.repository.complete_run(run, final_status)
+        stored = self.repository.get_run(str(run.id)) or run
+        yield {
+            "type": "run_completed",
+            "run": run_to_summary(stored),
+            "evidence": run_to_evidence(stored),
+        }
+
     def get_run(self, run_id: str) -> RunSummary | None:
         run = self.repository.get_run(run_id)
         return run_to_summary(run) if run else None
@@ -125,6 +199,96 @@ class DeHaluPipeline:
             policy=policy,
         )
 
+    def _evaluate_attempt_stream(
+        self,
+        *,
+        prompt: str,
+        language: str,
+        attempt_no: int,
+        code: str,
+        explanation: str,
+        entropy: dict,
+        logprob: dict,
+        can_repair: bool,
+    ):
+        yield _stage("claim_extraction", "running", 15, attempt_no)
+        claims = extract_claims(code, explanation)
+        yield _stage("claim_extraction", "done", 100, attempt_no)
+
+        findings = []
+        yield _stage("tree_sitter", "running", 15, attempt_no)
+        staged_findings = run_static_analysis_by_stage(code, language)
+        findings.extend(staged_findings["tree_sitter"])
+        yield _stage("tree_sitter", "done", 100, attempt_no)
+
+        yield _stage("semgrep", "running", 15, attempt_no)
+        findings.extend(staged_findings["semgrep"])
+        yield _stage("semgrep", "done", 100, attempt_no)
+
+        yield _stage("symbol_indexer", "running", 15, attempt_no)
+        findings.extend(validate_symbols(code, language, claims))
+        yield _stage("symbol_indexer", "done", 100, attempt_no)
+
+        yield _stage("metrics", "running", 15, attempt_no)
+        metrics = compute_metrics(code, claims, findings, entropy)
+        yield _stage("metrics", "done", 100, attempt_no)
+
+        judge_prompt = build_judge_prompt(
+            prompt,
+            code,
+            [claim.model_dump() for claim in claims],
+            [finding.model_dump() for finding in findings],
+            metrics.model_dump(),
+        )
+        yield _stage("judge_pool", "running", 15, attempt_no)
+        judge_results = self.judges.judge(judge_prompt, metrics.hallucination_risk_score)
+        yield _stage("judge_pool", "done", 100, attempt_no)
+
+        yield _stage("consensus", "running", 15, attempt_no)
+        consensus = consensus_from_judges(judge_results)
+        yield _stage("consensus", "done", 100, attempt_no)
+
+        yield _stage("cove", "running", 15, attempt_no)
+        cove = run_cove(claims, findings)
+        yield _stage("cove", "done", 100, attempt_no)
+
+        yield _stage("policy", "running", 15, attempt_no)
+        policy = decide_policy(findings, metrics, consensus, cove, can_repair=can_repair)
+        yield _stage("policy", "done", 100, attempt_no)
+
+        return AttemptEvidence(
+            output=GeneratedOutput(
+                attempt_no=attempt_no,
+                code=code,
+                explanation=explanation,
+                provider="ollama",
+                entropy_summary=entropy,
+                logprob_summary=logprob,
+            ),
+            claims=claims,
+            static_findings=findings,
+            metrics=metrics,
+            judge_results=judge_results,
+            judge_consensus=consensus,
+            cove_results=cove,
+            policy=policy,
+        )
+
+    def _stream_llm_attempt(self, *, prompt: str, attempt_no: int, stage: str, repair: bool):
+        yield _stage(stage, "running", 15, attempt_no)
+        raw_response = ""
+        metadata = {"entropy": {"available": False}, "logprob": {}}
+        stream = self.ollama.stream_repair(prompt) if repair else self.ollama.stream_generate(prompt)
+        for chunk in stream:
+            if chunk.text:
+                raw_response += chunk.text
+                yield {"type": "token", "attempt_no": attempt_no, "text": chunk.text}
+            if chunk.done and chunk.metadata:
+                metadata = chunk.metadata
+        code, explanation = extract_code_block(raw_response)
+        yield _stage(stage, "done", 100, attempt_no)
+        return code, explanation, metadata.get("entropy", {}), metadata.get("logprob", {})
+
     def _generation_prompt(self, user_prompt: str, inference: dict) -> str:
         return (
             "Generate code for the user request. Return code in a fenced code block and briefly list assumptions.\n"
@@ -144,3 +308,10 @@ class DeHaluPipeline:
             f"Static evidence:\n{static_evidence}\n"
             f"CoVe facts:\n{cove_facts}\n"
         )
+
+
+def _stage(stage: str, status: str, progress: int, attempt_no: int | None = None) -> dict:
+    event = {"type": "stage", "stage": stage, "status": status, "progress": progress}
+    if attempt_no is not None:
+        event["attempt_no"] = attempt_no
+    return event

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import re
 from typing import Any
@@ -8,6 +9,13 @@ import httpx
 
 from dehalu.api.schemas import JudgeResult
 from dehalu.core.settings import Settings
+
+
+@dataclass(frozen=True)
+class LLMStreamChunk:
+    text: str = ""
+    done: bool = False
+    metadata: dict[str, Any] | None = None
 
 
 def extract_code_block(text: str) -> tuple[str, str]:
@@ -49,6 +57,50 @@ class OllamaClient:
 
     def repair(self, prompt: str) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
         return self.generate(prompt)
+
+    def stream_generate(self, prompt: str):
+        if self.settings.allow_fake_llm:
+            code, _explanation, entropy, metadata = self._fake_generation(prompt)
+            for index in range(0, len(code), 16):
+                yield LLMStreamChunk(text=code[index : index + 16])
+            yield LLMStreamChunk(done=True, metadata={"entropy": entropy, "logprob": metadata})
+            return
+
+        payload = {"model": self.settings.ollama_model, "prompt": prompt, "stream": True}
+        final_metadata: dict[str, Any] = {}
+        try:
+            with httpx.stream(
+                "POST",
+                f"{self.settings.ollama_base_url.rstrip('/')}/api/generate",
+                json=payload,
+                timeout=self.settings.request_timeout_seconds,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    text = str(data.get("response", ""))
+                    if text:
+                        yield LLMStreamChunk(text=text)
+                    if data.get("done"):
+                        final_metadata = {
+                            "model": data.get("model", self.settings.ollama_model),
+                            "total_duration": data.get("total_duration"),
+                            "eval_count": data.get("eval_count"),
+                        }
+                        yield LLMStreamChunk(
+                            done=True,
+                            metadata={
+                                "entropy": {"available": False, "source": "ollama"},
+                                "logprob": final_metadata,
+                            },
+                        )
+        except Exception as exc:  # pragma: no cover - network dependent
+            raise RuntimeError(f"Ollama streaming failed: {exc}") from exc
+
+    def stream_repair(self, prompt: str):
+        yield from self.stream_generate(prompt)
 
     def _fake_generation(self, prompt: str) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
         lower = prompt.lower()

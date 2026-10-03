@@ -19,11 +19,15 @@ RISKY_PATTERNS = {
 
 
 def run_static_analysis(code: str, language: str) -> list[StaticFinding]:
-    findings: list[StaticFinding] = []
-    findings.extend(_tree_sitter_or_fallback(code, language))
-    findings.extend(_semgrep_or_fallback(code, language))
-    findings.extend(_generic_quality_checks(code))
-    return findings
+    staged = run_static_analysis_by_stage(code, language)
+    return staged["tree_sitter"] + staged["semgrep"]
+
+
+def run_static_analysis_by_stage(code: str, language: str) -> dict[str, list[StaticFinding]]:
+    return {
+        "tree_sitter": _tree_sitter_or_fallback(code, language),
+        "semgrep": _semgrep_or_fallback(code, language) + _generic_quality_checks(code),
+    }
 
 
 def _tree_sitter_or_fallback(code: str, language: str) -> list[StaticFinding]:

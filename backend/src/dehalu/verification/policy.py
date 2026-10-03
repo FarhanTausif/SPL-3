@@ -14,18 +14,35 @@ def decide_policy(
     blocking = [f for f in findings if f.severity == "error"]
     unsupported = [item for item in cove if item.verdict == "unsupported"]
     uncertain = [item for item in cove if item.verdict == "uncertain"]
+    hard_blocking = [
+        f
+        for f in blocking
+        if f.rule_id.startswith("tree-sitter.")
+        or f.rule_id in {"symbol-indexer.api-conflict", "symbol-indexer.unresolved-import"}
+        or f.rule_id == "semgrep.unsafe-shell"
+    ]
 
-    if blocking or unsupported or metrics.hallucination_risk_score >= 0.65 or consensus.final_verdict == "fail":
+    if hard_blocking or unsupported or metrics.hallucination_risk_score >= 0.65 or consensus.final_verdict == "fail":
         if can_repair:
             return PolicyDecision(
                 decision="repair",
                 reason="Blocking hallucination evidence was found and repair attempts remain.",
             )
+        if not hard_blocking and not unsupported and metrics.hallucination_risk_score < 0.85:
+            return PolicyDecision(
+                decision="warn",
+                reason="Risk remains after retry limit, but no hard static hallucination blocker remains.",
+            )
         return PolicyDecision(
             decision="reject",
             reason="Blocking hallucination evidence remains after retry limit was reached.",
         )
-    if uncertain or metrics.hallucination_risk_score >= 0.3 or consensus.final_verdict == "warn":
+    if blocking or uncertain or metrics.hallucination_risk_score >= 0.3 or consensus.final_verdict == "warn":
+        if can_repair:
+            return PolicyDecision(
+                decision="repair",
+                reason="Warning-level hallucination evidence was found and repair attempts remain.",
+            )
         return PolicyDecision(decision="warn", reason="Non-blocking uncertain evidence remains.")
     return PolicyDecision(decision="accept", reason="No blocking hallucination evidence detected.")
 

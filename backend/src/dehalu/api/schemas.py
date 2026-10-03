@@ -12,6 +12,11 @@ class RunCreate(BaseModel):
     constraints: list[str] = Field(default_factory=list)
 
 
+class RunStreamCreate(BaseModel):
+    prompt: str = Field(min_length=3)
+    constraints: list[str] = Field(default_factory=list)
+
+
 class InferenceResult(BaseModel):
     language: str | None = None
     framework: str | None = None

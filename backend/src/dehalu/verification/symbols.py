@@ -30,13 +30,24 @@ def validate_symbols(code: str, language: str, claims: list[Claim]) -> list[Stat
 
     for claim in claims:
         if claim.claim_type == "dependency":
-            if _looks_fake(claim.claim_text) or (language == "python" and not _python_import_exists(claim.claim_text)):
+            if _looks_fake(claim.claim_text):
                 claim.status = "unsupported"
                 findings.append(
                     StaticFinding(
                         rule_id="symbol-indexer.unresolved-import",
                         severity="error",
                         message=f"Dependency `{claim.claim_text}` could not be resolved.",
+                        location=claim.location,
+                        evidence_source="Symbol Indexer/API Validator",
+                    )
+                )
+            elif language == "python" and not _python_import_exists(claim.claim_text):
+                claim.status = "uncertain"
+                findings.append(
+                    StaticFinding(
+                        rule_id="symbol-indexer.unresolved-import",
+                        severity="warning",
+                        message=f"Dependency `{claim.claim_text}` is not installed in the local analysis environment.",
                         location=claim.location,
                         evidence_source="Symbol Indexer/API Validator",
                     )
