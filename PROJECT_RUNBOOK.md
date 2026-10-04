@@ -35,6 +35,7 @@ DEHALU_ALLOW_FAKE_LLM=true
 
 ```bash
 docker compose up -d postgres
+docker compose ps postgres # check that the container is running
 ```
 
 ## Backend
@@ -98,3 +99,33 @@ Ambiguous prompt:
 ```text
 add
 ```
+
+## Durable application workflow
+
+The API enqueues runs; start the separate worker to process them. Closing the browser does not stop a run. Run history and event replay restore the workspace after reload.
+
+```bash
+cd backend
+source .venv/bin/activate
+alembic upgrade head
+python -m dehalu.worker
+```
+
+Run the API and frontend in separate terminals using the commands above. Schema creation is migration-based; the API no longer creates tables at startup.
+
+- Initial generation is attempt 1; `DEHALU_MAX_RETRY=3` permits up to three repairs.
+- `DEHALU_PACKAGE_LOOKUPS=false` uses local catalogs only. Enable it for cached PyPI/npm/crates metadata requests. Unavailable metadata remains uncertain.
+- Install backend dependencies again after updating; Tree-sitter grammars and Semgrep are pinned. Generated programs are never executed or installed.
+- Missing judge keys produce unavailable results, not simulated passing verdicts. Fake mode is explicit and never counts as semantic verification.
+- Failed/interrupted runs retain completed attempts and partial stage evidence. Retry by submitting a new run; clarification resumes the existing run.
+- Regenerate frontend contracts after changing API/domain schemas:
+
+```bash
+PYTHONPATH=backend/src backend/.venv/bin/python backend/scripts/generate_contracts.py
+```
+
+`POST /api/runs` returns HTTP 202. `GET /api/runs/{id}/events` supports event replay using `after` or `Last-Event-ID`. The former POST streaming endpoint remains a compatibility wrapper around the same durable queue.
+
+Judge model defaults now use `gemini-flash-latest`, `openai/gpt-oss-20b`, and `mistral-small-latest`. Existing `.env` values take precedence; update retired model names there. Provider catalog visibility does not guarantee generation quota or model access. These failures are shown explicitly in judge evidence and prevent unrestricted acceptance.
+
+Use `PYTHONPATH=src .venv/bin/python scripts/provider_readiness.py` from `backend` to check authenticated model catalogs without displaying credentials. `scripts/smoke_live.py` performs real provider calls; use a disposable, migrated `DATABASE_URL` for that check.
