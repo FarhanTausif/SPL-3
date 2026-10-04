@@ -1,242 +1,196 @@
 "use client";
-
-import { Check, Code2, Copy, GitCompareArrows } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, Code2, Copy, GitCompareArrows } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import type { AttemptEvidence } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-type AttemptDraft = {
-  attempt_no: number;
-  code: string;
-};
-
-type DiffLine = {
-  type: "same" | "add" | "remove";
-  text: string;
-};
-
+import { buildLineDiff, mergeAttempts } from "@/lib/code";
+import { Button } from "./ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
+import { MarkdownText } from "./MarkdownText";
+export type SourceTarget = { attempt: number; start: number; end: number; nonce: number };
 export function CodeAttempts({
   attempts,
   streamed,
-  language = "text"
+  language = "text",
+  selectedAttempt = null,
+  sourceTarget
 }: {
   attempts: AttemptEvidence[];
   streamed: Record<number, string>;
   language?: string;
+  selectedAttempt?: number | null;
+  sourceTarget?: SourceTarget | null;
 }) {
-  const [selectedAttempt, setSelectedAttempt] = useState(0);
   const drafts = useMemo(() => mergeAttempts(attempts, streamed), [attempts, streamed]);
   const initial = drafts[0];
-  const latest = drafts.find(attempt => attempt.attempt_no === selectedAttempt) ?? drafts[drafts.length - 1];
-  const diff = useMemo(() => buildLineDiff(initial?.code ?? "", latest?.code ?? ""), [initial?.code, latest?.code]);
-
-  if (!initial) {
-    return (
-    <Card className="min-h-[360px] min-w-0 max-w-full overflow-hidden border-stone-200/80 bg-white/90 shadow-sm">
-        <CardHeader className="p-5">
-          <CardTitle className="flex items-center gap-2">
-            <Code2 className="size-4 text-emerald-700" />
-            Generated Code
-          </CardTitle>
-          <CardDescription>Code will stream here as soon as generation starts.</CardDescription>
-        </CardHeader>
-        <CardContent className="p-5 pt-0">
-          <div className="grid min-h-[240px] place-items-center rounded-lg border border-dashed border-stone-300 bg-stone-50 text-sm text-stone-500">
-            Waiting for generation
-          </div>
-        </CardContent>
-      </Card>
+  const selected =
+    drafts.find((a) => a.attempt_no === selectedAttempt) ?? drafts[drafts.length - 1];
+  const output = attempts.find((a) => a.output.attempt_no === selected?.attempt_no)?.output;
+  const [tab, setTab] = useState("code");
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const [highlight, setHighlight] = useState<SourceTarget | null>(null);
+  const diff = useMemo(
+    () => buildLineDiff(initial?.code ?? "", selected?.code ?? ""),
+    [initial?.code, selected?.code]
+  );
+  useEffect(() => {
+    setTab("code");
+    setCopied(false);
+    setCopyError(false);
+  }, [selected?.attempt_no]);
+  useEffect(() => {
+    if (!sourceTarget) return;
+    setTab("code");
+    setHighlight(sourceTarget);
+    const frame = requestAnimationFrame(() =>
+      document
+        .getElementById(`code-${sourceTarget.attempt}-line-${sourceTarget.start}`)
+        ?.scrollIntoView({
+          block: "center",
+          behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+        })
     );
-  }
-
+    const timer = setTimeout(() => setHighlight(null), 4000);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [sourceTarget]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  if (!selected)
+    return (
+      <section className="flex min-h-80 flex-col items-center justify-center rounded-lg border border-dashed bg-card px-6 text-center">
+        <Code2 className="mb-3 size-6 text-muted-foreground" />
+        <h2 className="text-base font-medium">Waiting for generation</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Code appears here as generation starts.
+        </p>
+      </section>
+    );
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(selected.code);
+      setCopied(true);
+      setCopyError(false);
+    } catch {
+      setCopyError(true);
+    }
+  };
   return (
-    <Card id={attempts[attempts.length - 1]?.output.id} className="min-w-0 max-w-full overflow-hidden border-stone-200/80 bg-white/90 shadow-sm">
-      <CardHeader className="flex-row items-start justify-between gap-4 p-5 pb-3">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <Code2 className="size-4 text-emerald-700" />
-            Generated Code
-          </CardTitle>
-          <CardDescription>Initial, latest, and line-level diff are preserved across repair attempts.</CardDescription>
-          <label className="mt-2 block text-xs text-stone-600">Compare with initial <select aria-label="Code attempt" className="ml-2 rounded border p-1" value={selectedAttempt} onChange={event => setSelectedAttempt(Number(event.target.value))}>
-            <option value={0}>Latest attempt</option>
-            {drafts.map(attempt => <option key={attempt.attempt_no} value={attempt.attempt_no}>Attempt {attempt.attempt_no}</option>)}
-          </select></label>
-        </div>
-      </CardHeader>
-      <CardContent className="min-w-0 p-5 pt-0">
-        <Tabs defaultValue="latest" className="min-w-0 max-w-full">
-          <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-md bg-stone-100 p-1">
-            <TabsTrigger value="initial" className="shrink-0">Initial</TabsTrigger>
-            <TabsTrigger value="latest" className="shrink-0">Latest</TabsTrigger>
-            <TabsTrigger value="diff" className="shrink-0">
-              <GitCompareArrows className="size-3.5" />
-              Diff
+    <section className="min-w-0" aria-label="Generated code">
+      <Tabs value={tab} onValueChange={setTab}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <TabsList>
+            <TabsTrigger value="code">
+              <Code2 className="size-4" />
+              Code
+            </TabsTrigger>
+            <TabsTrigger value="changes" disabled={selected.attempt_no === initial.attempt_no}>
+              <GitCompareArrows className="size-4" />
+              Changes
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="initial" className="min-w-0">
-            <CodeBlock label={`Initial generation · attempt ${initial.attempt_no}`} code={initial.code} language={language} />
-          </TabsContent>
-          <TabsContent value="latest" className="min-w-0">
-            <CodeBlock label={`Selected generation · attempt ${latest.attempt_no}`} code={latest.code} language={language} />
-          </TabsContent>
-          <TabsContent value="diff" className="min-w-0">
-            <div className="max-h-[620px] max-w-full overflow-auto rounded-lg border border-stone-800 bg-[#1e1e1e] py-3 text-[13px] leading-6 shadow-inner">
-              {diff.map((line, index) => (
-                <div
-                  className={
-                    line.type === "add"
-                      ? "grid grid-cols-[28px_minmax(0,1fr)] gap-2 bg-emerald-500/15 px-3 text-emerald-50"
-                      : line.type === "remove"
-                        ? "grid grid-cols-[28px_minmax(0,1fr)] gap-2 bg-red-500/15 px-3 text-red-50"
-                        : "grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 text-stone-200"
-                  }
-                  key={`${line.type}-${index}-${line.text}`}
-                >
-                  <span className="select-none text-stone-500">{line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}</span>
-                  <DiffCode line={line.text || " "} language={language} />
-                </div>
-              ))}
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-xs text-muted-foreground">
+              {language} · attempt {selected.attempt_no}
+            </span>
+            <Button variant="outline" size="sm" onClick={copy} aria-label="Copy code">
+              {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        </div>
+        {copyError && (
+          <p role="alert" className="mb-2 text-xs text-danger">
+            Clipboard unavailable. Select the code to copy it.
+          </p>
+        )}
+        <TabsContent value="code" className="mt-0">
+          <div className="editor min-w-0 max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-[#161b22]">
+            <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-2 font-mono text-xs text-zinc-400">
+              <span className="size-1.5 rounded-full bg-emerald-500" />
+              {output ? "Generated artifact" : "Streaming generation"}
+              <span className="ml-auto">{selected.code.split("\n").length} lines</span>
             </div>
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+            <SyntaxHighlighter
+              language={language === "cpp" ? "cpp" : language}
+              style={vscDarkPlus}
+              showLineNumbers
+              wrapLongLines
+              wrapLines
+              lineProps={(line) => ({
+                id: `code-${selected.attempt_no}-line-${line}`,
+                className:
+                  highlight?.attempt === selected.attempt_no &&
+                  line >= highlight.start &&
+                  line <= highlight.end
+                    ? "source-highlight"
+                    : "",
+                style: { display: "block" }
+              })}
+              codeTagProps={{
+                style: {
+                  fontFamily: "var(--font-geist-mono), monospace",
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere"
+                }
+              }}
+              customStyle={{
+                margin: 0,
+                minHeight: 360,
+                maxHeight: "65vh",
+                width: "100%",
+                maxWidth: "100%",
+                overflow: "auto",
+                background: "#161b22",
+                fontSize: 13,
+                lineHeight: 1.8,
+                padding: "16px 12px"
+              }}
+            >
+              {selected.code}
+            </SyntaxHighlighter>
+          </div>
+        </TabsContent>
+        <TabsContent value="changes" className="mt-0">
+          <p className="mb-2 text-xs text-muted-foreground">
+            Attempt 1 → attempt {selected.attempt_no}
+          </p>
+          <div className="editor max-h-[65vh] overflow-auto rounded-lg border border-zinc-800 bg-[#161b22] py-3 font-mono text-[13px] leading-6">
+            {diff.map((line, i) => (
+              <div
+                key={i}
+                className={`grid grid-cols-[24px_minmax(0,1fr)] gap-2 px-3 ${line.type === "add" ? "bg-emerald-500/15 text-emerald-100" : line.type === "remove" ? "bg-red-500/15 text-red-100" : "text-zinc-300"}`}
+              >
+                <span aria-label={line.type} className="select-none text-zinc-500">
+                  {line.type === "add" ? "+" : line.type === "remove" ? "−" : " "}
+                </span>
+                <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                  {line.text || " "}
+                </span>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+      </Tabs>
+      {output?.explanation && (
+        <Collapsible className="mt-4 rounded-lg border bg-card">
+          <CollapsibleTrigger className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium">
+            Generation explanation
+            <ChevronDown className="size-4" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="border-t px-4 py-3">
+            <MarkdownText>{output.explanation}</MarkdownText>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </section>
   );
-}
-
-function CodeBlock({ label, code, language }: { label: string; code: string; language: string }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
-  }
-
-  return (
-    <div className="max-w-full overflow-hidden rounded-lg border border-stone-800 bg-[#1e1e1e] shadow-inner">
-      <div className="flex items-center justify-between gap-3 border-b border-stone-800 bg-[#252526] px-3 py-2 text-xs text-stone-300">
-        <span className="truncate">{label}</span>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-stone-200 hover:bg-stone-700 hover:text-white" type="button" onClick={copy} aria-label="Copy code">
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-        </Button>
-      </div>
-      <SyntaxHighlighter
-        language={language}
-        style={vscDarkPlus}
-        codeTagProps={{
-          style: {
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word"
-          }
-        }}
-        customStyle={{
-          margin: 0,
-          minHeight: 320,
-          maxHeight: 620,
-          width: "100%",
-          maxWidth: "100%",
-          overflow: "auto",
-          background: "#1e1e1e",
-          fontSize: 13,
-          lineHeight: 1.65,
-          padding: 16
-        }}
-        showLineNumbers
-        wrapLongLines
-      >
-        {code}
-      </SyntaxHighlighter>
-    </div>
-  );
-}
-
-function DiffCode({ line, language }: { line: string; language: string }) {
-  return (
-    <SyntaxHighlighter
-      language={language}
-      style={vscDarkPlus}
-      PreTag="span"
-      CodeTag="span"
-      codeTagProps={{
-        style: {
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word"
-        }
-      }}
-      customStyle={{
-        margin: 0,
-        padding: 0,
-        background: "transparent",
-        display: "inline",
-        fontSize: 13,
-        lineHeight: 1.5
-      }}
-      wrapLongLines
-    >
-      {line}
-    </SyntaxHighlighter>
-  );
-}
-
-function mergeAttempts(attempts: AttemptEvidence[], streamed: Record<number, string>): AttemptDraft[] {
-  const map = new Map<number, string>();
-  for (const attempt of attempts) {
-    map.set(attempt.output.attempt_no, attempt.output.code);
-  }
-  for (const [attemptNo, code] of Object.entries(streamed)) {
-    if (code.trim() && !map.has(Number(attemptNo))) {
-      const artifact = code.match(/```[^\n]*\n([\s\S]*?)(?:```|$)/);
-      map.set(Number(attemptNo), artifact?.[1] ?? code);
-    }
-  }
-  return Array.from(map.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([attempt_no, code]) => ({ attempt_no, code }));
-}
-
-function buildLineDiff(before: string, after: string): DiffLine[] {
-  const a = before.split("\n");
-  const b = after.split("\n");
-  if (a.length * b.length > 1_000_000) return [...a.map(text => ({ type: "remove" as const, text })), ...b.map(text => ({ type: "add" as const, text }))];
-  const rows = a.length + 1;
-  const cols = b.length + 1;
-  const table = Array.from({ length: rows }, () => Array<number>(cols).fill(0));
-
-  for (let i = a.length - 1; i >= 0; i -= 1) {
-    for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i][j] = a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
-    }
-  }
-
-  const lines: DiffLine[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < a.length && j < b.length) {
-    if (a[i] === b[j]) {
-      lines.push({ type: "same", text: a[i] });
-      i += 1;
-      j += 1;
-    } else if (table[i + 1][j] >= table[i][j + 1]) {
-      lines.push({ type: "remove", text: a[i] });
-      i += 1;
-    } else {
-      lines.push({ type: "add", text: b[j] });
-      j += 1;
-    }
-  }
-  while (i < a.length) {
-    lines.push({ type: "remove", text: a[i] });
-    i += 1;
-  }
-  while (j < b.length) {
-    lines.push({ type: "add", text: b[j] });
-    j += 1;
-  }
-  return lines.length ? lines : [{ type: "same", text: "" }];
 }

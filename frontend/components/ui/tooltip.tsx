@@ -12,15 +12,17 @@ const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
 >(({ className, sideOffset = 6, ...props }, ref) => (
-  <TooltipPrimitive.Content
-    ref={ref}
-    sideOffset={sideOffset}
-    className={cn(
-      "z-50 max-w-xs overflow-hidden rounded-md border border-stone-200 bg-stone-950 px-3 py-2 text-xs leading-5 text-white shadow-md animate-in fade-in-0 zoom-in-95",
-      className
-    )}
-    {...props}
-  />
+  <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Content
+      ref={ref}
+      sideOffset={sideOffset}
+      className={cn(
+        "z-50 max-w-xs overflow-hidden rounded-md border border-border bg-foreground px-3 py-2 text-xs leading-5 text-white shadow-md animate-in fade-in-0 zoom-in-95",
+        className
+      )}
+      {...props}
+    />
+  </TooltipPrimitive.Portal>
 ));
 TooltipContent.displayName = TooltipPrimitive.Content.displayName;
 

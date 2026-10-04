@@ -3,6 +3,10 @@ import { cn } from "@/lib/utils";
 
 const toneMap: Record<string, "good" | "warn" | "bad" | "info" | "neutral"> = {
   accept: "good",
+  available: "good",
+  ok: "good",
+  partial: "warn",
+  configured: "neutral",
   completed: "good",
   done: "good",
   pass: "good",
@@ -34,7 +38,10 @@ export function StatusBadge({ value, compact = false }: { value: string; compact
   return (
     <Badge
       variant={tone}
-      className={cn("shrink-0 whitespace-nowrap", compact ? "px-1.5 py-0 text-[10px] leading-4" : "")}
+      className={cn(
+        "shrink-0 whitespace-nowrap",
+        compact ? "px-1.5 py-0 text-[10px] leading-4" : ""
+      )}
     >
       {value.replace(/_/g, " ")}
     </Badge>

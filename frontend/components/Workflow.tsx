@@ -1,9 +1,9 @@
-import { Activity, CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+"use client";
+import { CheckCircle2, ChevronDown, Circle, Loader2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import type { StageStatus, WorkflowStageKey } from "@/lib/api";
-
 export type StageView = {
   key: WorkflowStageKey;
   label: string;
@@ -11,88 +11,120 @@ export type StageView = {
   progress: number;
   attemptNo?: number;
 };
-
 export const defaultStages: StageView[] = [
-  { key: "intake", label: "Intake", status: "pending", progress: 0 },
-  { key: "clarification", label: "Clarify", status: "pending", progress: 0 },
-  { key: "generation", label: "Generate", status: "pending", progress: 0 },
-  { key: "claim_extraction", label: "Claims", status: "pending", progress: 0 },
-  { key: "tree_sitter", label: "AST", status: "pending", progress: 0 },
-  { key: "semgrep", label: "SAST", status: "pending", progress: 0 },
-  { key: "symbol_indexer", label: "Symbols", status: "pending", progress: 0 },
-  { key: "metrics", label: "Metrics", status: "pending", progress: 0 },
-  { key: "judge_pool", label: "Judges", status: "pending", progress: 0 },
-  { key: "consensus", label: "Consensus", status: "pending", progress: 0 },
-  { key: "cove", label: "CoVe", status: "pending", progress: 0 },
-  { key: "policy", label: "Policy", status: "pending", progress: 0 },
-  { key: "repair", label: "Repair", status: "pending", progress: 0 }
+  ["intake", "Intake"],
+  ["clarification", "Clarification"],
+  ["generation", "Generation"],
+  ["claim_extraction", "Claims"],
+  ["tree_sitter", "Parsing"],
+  ["semgrep", "Safety scan"],
+  ["symbol_indexer", "Symbols & APIs"],
+  ["metrics", "Metrics"],
+  ["judge_pool", "Judge pool"],
+  ["consensus", "Consensus"],
+  ["cove", "Chain of verification"],
+  ["policy", "Policy"],
+  ["repair", "Repair"]
+].map(([key, label]) => ({ key: key as WorkflowStageKey, label, status: "pending", progress: 0 }));
+const groups: { label: string; keys: WorkflowStageKey[] }[] = [
+  { label: "Intake", keys: ["intake", "clarification"] },
+  { label: "Generation", keys: ["generation"] },
+  {
+    label: "Static checks",
+    keys: ["claim_extraction", "tree_sitter", "semgrep", "symbol_indexer", "metrics"]
+  },
+  { label: "Judges", keys: ["judge_pool", "consensus"] },
+  { label: "Verification", keys: ["cove"] },
+  { label: "Decision", keys: ["policy"] }
 ];
-
 export function Workflow({ status, stages }: { status: string; stages: StageView[] }) {
-  const active = stages.find((stage) => stage.status === "running");
-  const doneCount = stages.filter((stage) => stage.status === "done").length;
-
+  const active = stages.find((s) => s.status === "running");
+  const iteration = Math.max(1, ...stages.map((s) => s.attemptNo ?? 1));
   return (
-    <Card className="overflow-hidden border-stone-200/80 bg-white/90 shadow-sm backdrop-blur">
-      <CardHeader className="flex-row items-start justify-between gap-4 p-4 pb-2">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-[15px]">
-            <Activity className="size-4 text-emerald-700" />
-            Workflow
-          </CardTitle>
-          <CardDescription>
-            {active ? `${active.label} is running` : `${doneCount}/${stages.length} stages complete`}
-          </CardDescription>
+    <section aria-label="Verification workflow" className="border-b bg-card px-4 py-3 sm:px-6">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>
+          {active
+            ? `${active.label} in progress`
+            : status === "queued"
+              ? "Queued · waiting for a worker"
+              : status === "completed" || status === "rejected"
+                ? "Verification finished"
+                : status === "idle"
+                  ? "Generation and verification"
+                  : `Run ${status.replace(/_/g, " ")}`}
+        </span>
+        <span className="font-mono">
+          Attempt {iteration}
+          {iteration > 1 ? ` · repair ${iteration - 1}` : ""}
+        </span>
+      </div>
+      <div className="overflow-x-auto pb-1">
+        <div className="flex min-w-[680px] gap-2">
+          {groups.map((group) => {
+            const underlying = stages.filter((s) => group.keys.includes(s.key));
+            const required = underlying.filter(
+              (s) => s.key !== "clarification" || s.status !== "pending"
+            );
+            const groupStatus = required.some((s) => s.status === "failed")
+              ? "failed"
+              : required.some((s) => s.status === "running")
+                ? "running"
+                : required.every((s) => s.status === "done")
+                  ? "done"
+                  : "pending";
+            const Icon =
+              groupStatus === "done"
+                ? CheckCircle2
+                : groupStatus === "running"
+                  ? Loader2
+                  : groupStatus === "failed"
+                    ? XCircle
+                    : Circle;
+            return (
+              <Collapsible key={group.label} className="min-w-0 flex-1">
+                <CollapsibleTrigger
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-xs font-medium hover:bg-muted",
+                    groupStatus === "running" && "bg-active-surface text-active",
+                    groupStatus === "done" && "text-good",
+                    groupStatus === "failed" && "text-danger"
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon
+                      className={cn("size-4 shrink-0", groupStatus === "running" && "animate-spin")}
+                    />
+                    {group.label}
+                  </span>
+                  <ChevronDown className="size-3 shrink-0" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 space-y-2 text-xs">
+                  {underlying.map((s) => (
+                    <div key={s.key} className="space-y-1">
+                      <span className="block text-muted-foreground">{s.label}</span>
+                      <StatusBadge
+                        value={
+                          s.key === "clarification" && s.status === "pending"
+                            ? "not required"
+                            : s.status
+                        }
+                        compact
+                      />
+                      {s.status === "running" && (
+                        <span className="ml-1 font-mono">{s.progress}%</span>
+                      )}
+                    </div>
+                  ))}
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
         </div>
-        <StatusBadge value={status} />
-      </CardHeader>
-      <CardContent className="p-4 pt-2">
-        <div className="overflow-x-auto pb-1">
-          <div className="grid min-w-[920px] grid-cols-[repeat(13,minmax(0,1fr))] gap-2">
-            {stages.map((stage) => (
-              <StageTile key={stage.key} stage={stage} />
-            ))}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function StageTile({ stage }: { stage: StageView }) {
-  const Icon = stage.status === "done" ? CheckCircle2 : stage.status === "failed" ? XCircle : stage.status === "running" ? Loader2 : Circle;
-
-  return (
-    <div
-      className={cn(
-        "min-w-0 rounded-md border bg-stone-50 p-2 transition-all",
-        stage.status === "running" && "border-sky-300 bg-sky-50 shadow-[0_0_0_3px_rgba(14,165,233,0.12)]",
-        stage.status === "done" && "border-emerald-200 bg-emerald-50/70",
-        stage.status === "failed" && "border-red-200 bg-red-50"
+      </div>
+      {active?.key === "repair" && (
+        <p className="mt-2 text-xs text-warning">Preparing evidence-constrained repair</p>
       )}
-    >
-      <div className="mb-2 flex items-center justify-between gap-1">
-        <Icon
-          className={cn(
-            "size-3.5 shrink-0",
-            stage.status === "running" && "animate-spin text-sky-700",
-            stage.status === "done" && "text-emerald-700",
-            stage.status === "failed" && "text-red-700",
-            stage.status === "pending" && "text-stone-400"
-          )}
-        />
-        <span className="truncate text-[11px] font-semibold text-stone-700">{stage.label}</span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-stone-200">
-        <div
-          className={cn("h-full rounded-full transition-[width] duration-300", stage.status === "failed" ? "bg-red-600" : "bg-emerald-700")}
-          style={{ width: `${Math.max(0, Math.min(stage.progress, 100))}%` }}
-        />
-      </div>
-      <div className="mt-1 flex items-center justify-between text-[10px] text-stone-500">
-        <span>{stage.progress}%</span>
-        {stage.attemptNo ? <span>A{stage.attemptNo}</span> : null}
-      </div>
-    </div>
+    </section>
   );
 }

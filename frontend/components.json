@@ -7,7 +7,7 @@
     "css": "app/globals.css",
     "baseColor": "neutral",
     "cssVariables": true,
-    "config": "tailwind.config.js"
+    "config": ""
   },
   "aliases": {
     "components": "@/components",
