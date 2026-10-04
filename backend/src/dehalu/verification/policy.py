@@ -1,62 +1,25 @@
-from __future__ import annotations
-
-from dehalu.api.schemas import CoVeResult, JudgeConsensus, MetricResult, PolicyDecision, StaticFinding
+from dehalu.domain.models import AnalyzerCoverage, CoVeResult, JudgeConsensus, MetricResult, PolicyDecision, StaticFinding
 
 
-def decide_policy(
-    findings: list[StaticFinding],
-    metrics: MetricResult,
-    consensus: JudgeConsensus,
-    cove: list[CoVeResult],
-    *,
-    can_repair: bool,
-) -> PolicyDecision:
-    blocking = [f for f in findings if f.severity == "error"]
-    unsupported = [item for item in cove if item.verdict == "unsupported"]
-    uncertain = [item for item in cove if item.verdict == "uncertain"]
-    hard_blocking = [
-        f
-        for f in blocking
-        if f.rule_id.startswith("tree-sitter.")
-        or f.rule_id in {"symbol-indexer.api-conflict", "symbol-indexer.unresolved-import"}
-        or f.rule_id == "semgrep.unsafe-shell"
-    ]
-
-    if hard_blocking or unsupported or metrics.hallucination_risk_score >= 0.65 or consensus.final_verdict == "fail":
-        if can_repair:
-            return PolicyDecision(
-                decision="repair",
-                reason="Blocking hallucination evidence was found and repair attempts remain.",
-            )
-        if not hard_blocking and not unsupported and metrics.hallucination_risk_score < 0.85:
-            return PolicyDecision(
-                decision="warn",
-                reason="Risk remains after retry limit, but no hard static hallucination blocker remains.",
-            )
-        return PolicyDecision(
-            decision="reject",
-            reason="Blocking hallucination evidence remains after retry limit was reached.",
-        )
-    if blocking or uncertain or metrics.hallucination_risk_score >= 0.3 or consensus.final_verdict == "warn":
-        if can_repair:
-            return PolicyDecision(
-                decision="repair",
-                reason="Warning-level hallucination evidence was found and repair attempts remain.",
-            )
-        return PolicyDecision(decision="warn", reason="Non-blocking uncertain evidence remains.")
-    return PolicyDecision(decision="accept", reason="No blocking hallucination evidence detected.")
+def decide_policy(findings: list[StaticFinding], metrics: MetricResult, consensus: JudgeConsensus,
+                  cove: list[CoVeResult], *, can_repair: bool, coverage: list[AnalyzerCoverage] | None = None) -> PolicyDecision:
+    blockers = [f for f in findings if f.severity == 'error']
+    contradictions = [c for c in cove if c.verdict == 'unsupported']
+    if blockers or contradictions or consensus.final_verdict == 'fail':
+        return PolicyDecision(decision='repair' if can_repair else 'reject',
+            reason='Blocking static/claim evidence or majority semantic failure remains.' + (' Repair attempts remain.' if can_repair else ' No further repairs allowed.'),
+            evidence_ids=[f.id for f in blockers])
+    incomplete = any(c.status != 'available' for c in (coverage or []))
+    uncertain = any(c.verdict == 'uncertain' for c in cove)
+    if incomplete or uncertain or not cove or consensus.valid_count < 3 or consensus.final_verdict != 'pass' or any(f.severity == 'warning' for f in findings) or metrics.tr_s >= .3:
+        return PolicyDecision(decision='warn', reason='No blocking contradiction found; uncertainty, limited coverage, quality findings or incomplete/disagreeing judges remain.')
+    return PolicyDecision(decision='accept', reason='Material claims are supported, configured checks completed, and all three judges pass.')
 
 
 def consensus_from_judges(judges) -> JudgeConsensus:
-    if not judges:
-        return JudgeConsensus(final_verdict="warn", average_score=0.5, agreement_level="none", summary="No judges ran.")
-    avg = sum(j.score for j in judges) / len(judges)
-    verdicts = [j.verdict for j in judges]
-    final = "fail" if verdicts.count("fail") >= 2 else "warn" if "warn" in verdicts or "fail" in verdicts else "pass"
-    agreement = "high" if len(set(verdicts)) == 1 else "medium" if len(set(verdicts)) == 2 else "low"
-    return JudgeConsensus(
-        final_verdict=final,
-        average_score=round(avg, 3),
-        agreement_level=agreement,
-        summary=f"Judge pool verdicts: {', '.join(verdicts)}.",
-    )
+    valid = [j for j in judges if j.status == 'ok' and j.verdict is not None and j.score is not None]
+    verdicts = [j.verdict for j in valid]
+    final = 'fail' if verdicts.count('fail') >= 2 else 'pass' if len(valid) == 3 and all(v == 'pass' for v in verdicts) else 'warn'
+    agreement = 'none' if not valid else 'high' if len(set(verdicts)) == 1 else 'medium' if len(set(verdicts)) == 2 else 'low'
+    return JudgeConsensus(final_verdict=final, average_score=round(sum(j.score for j in valid) / len(valid), 4) if valid else None,
+        agreement_level=agreement, valid_count=len(valid), summary=f"{len(valid)}/3 valid judges: {', '.join(verdicts) or 'none'}. Missing/simulated results do not establish support.")

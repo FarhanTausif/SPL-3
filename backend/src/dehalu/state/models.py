@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import uuid
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,12 +49,14 @@ class RunRecord(Base):
 
 class GeneratedOutputRecord(Base):
     __tablename__ = "generated_outputs"
+    __table_args__ = (UniqueConstraint("run_id", "attempt_no", name="uq_output_attempt"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"), nullable=False)
     attempt_no: Mapped[int] = mapped_column(Integer)
     code: Mapped[str] = mapped_column(Text)
     explanation: Mapped[str] = mapped_column(Text, default="")
+    evidence_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     provider: Mapped[str] = mapped_column(String(64))
     entropy_summary: Mapped[dict] = mapped_column(JSONB, default=dict)
     logprob_summary: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -111,13 +113,14 @@ class StaticFindingRecord(Base):
 
 class MetricResultRecord(Base):
     __tablename__ = "metric_results"
+    __table_args__ = (UniqueConstraint("output_id", name="uq_metric_output"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     output_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("generated_outputs.id"), nullable=False)
     mihn: Mapped[float] = mapped_column(Float)
     mahr: Mapped[float] = mapped_column(Float)
     tr_s: Mapped[float] = mapped_column(Float)
-    entropy_score: Mapped[float] = mapped_column(Float)
+    entropy_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     hallucination_risk_score: Mapped[float] = mapped_column(Float)
 
     output: Mapped[GeneratedOutputRecord] = relationship(back_populates="metric_result")
@@ -131,7 +134,7 @@ class JudgeResultRecord(Base):
     judge_name: Mapped[str] = mapped_column(String(64))
     judge_model: Mapped[str] = mapped_column(String(128))
     verdict: Mapped[str] = mapped_column(String(32))
-    score: Mapped[float] = mapped_column(Float)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
     rubric_json: Mapped[dict] = mapped_column(JSONB, default=dict)
     explanation: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -141,11 +144,12 @@ class JudgeResultRecord(Base):
 
 class JudgeConsensusRecord(Base):
     __tablename__ = "judge_consensus"
+    __table_args__ = (UniqueConstraint("output_id", name="uq_consensus_output"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     output_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("generated_outputs.id"), nullable=False)
     final_verdict: Mapped[str] = mapped_column(String(32))
-    average_score: Mapped[float] = mapped_column(Float)
+    average_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     agreement_level: Mapped[str] = mapped_column(String(32))
     summary: Mapped[str] = mapped_column(Text)
 
@@ -178,3 +182,24 @@ class PolicyDecisionRecord(Base):
 
     run: Mapped[RunRecord] = relationship(back_populates="policy_decisions")
     output: Mapped[GeneratedOutputRecord | None] = relationship(back_populates="policy_decisions")
+
+
+class RunJobRecord(Base):
+    __tablename__ = "run_jobs"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RunEventRecord(Base):
+    __tablename__ = "run_events"
+    __table_args__ = (UniqueConstraint("run_id", "sequence", name="uq_run_event_sequence"),)
+    id: Mapped[uuid.UUID] = uuid_pk()
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"), nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    event_type: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(JSONB)

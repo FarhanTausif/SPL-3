@@ -7,18 +7,21 @@ from dehalu.api.schemas import InferenceResult
 
 LANGUAGE_HINTS = {
     "python": ["python", "django", "flask", "fastapi", "pytest", "pandas", "numpy"],
+    "typescript": ["typescript", " ts ", "tsx"],
     "javascript": ["javascript", "node", "express", "react", "next.js", "nextjs"],
-    "typescript": ["typescript", "ts", "tsx"],
-    "java": ["java", "spring"],
+    "java": [" java ", "spring"],
     "go": ["golang", " go "],
     "rust": ["rust", "cargo"],
-    "c": [" c ", "clang"],
     "cpp": ["c++", "cpp"],
+    "c": [" c ", "clang"],
 }
 
 
 def infer_prompt(prompt: str, language_hint: str | None, constraints: list[str]) -> InferenceResult:
     text = f" {prompt.lower()} "
+    if language_hint:
+        from dehalu.verification.adapters import normalize
+        language_hint = normalize(language_hint)
     language = language_hint or None
     if not language:
         for candidate, hints in LANGUAGE_HINTS.items():
@@ -28,11 +31,15 @@ def infer_prompt(prompt: str, language_hint: str | None, constraints: list[str])
 
     framework = _first_match(text, ["fastapi", "django", "flask", "react", "next.js", "express", "spring"])
     runtime = _first_match(text, ["node", "browser", "python 3", "jvm", "cli"])
-    libraries = sorted(set(re.findall(r"(?:use|using|with|import)\s+([a-zA-Z_][\w.-]+)", prompt, re.I)))
-    requirements = [sentence.strip() for sentence in re.split(r"[.;\n]", prompt) if sentence.strip()]
+    candidates = re.findall(r"(?:using|import)\s+([a-zA-Z_][\w.-]+)", prompt, re.I)
+    ignored = {'a', 'an', 'the', 'no', 'standard', *LANGUAGE_HINTS}
+    libraries = sorted({name for name in candidates if name.lower() not in ignored})
+    requirements = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+|\n", prompt) if sentence.strip()]
     uncertain = []
     questions = []
 
+    if language and not language_hint and language not in text:
+        uncertain.append(f"Target language {language} was inferred from framework/tool cues.")
     if not language:
         uncertain.append("Target language was not explicitly stated.")
         if len(prompt.split()) < 6:
@@ -50,6 +57,7 @@ def infer_prompt(prompt: str, language_hint: str | None, constraints: list[str])
         runtime=runtime,
         libraries=libraries,
         requirements=requirements,
+        constraints=constraints,
         uncertain_assumptions=uncertain,
         clarification_questions=questions,
         needs_clarification=bool(questions),
