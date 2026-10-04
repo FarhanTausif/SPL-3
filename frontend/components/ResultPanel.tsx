@@ -23,9 +23,10 @@ export function ResultPanel({ run }: { run: RunSummary | null }) {
           <CardTitle className="text-[15px]">Run Summary</CardTitle>
           <CardDescription className="break-all">{run.model_name}</CardDescription>
         </div>
-        <StatusBadge value={run.policy_decision?.decision ?? run.status} />
+        <StatusBadge value={run.status === "completed" || run.status === "rejected" ? run.policy_decision?.decision ?? run.status : run.status} />
       </CardHeader>
       <CardContent className="space-y-3 p-4 pt-0">
+        {run.error && <p className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{run.error}</p>}
         {run.inferred.needs_clarification ? (
           <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-sky-900">

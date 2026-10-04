@@ -21,14 +21,17 @@ type DiffLine = {
 
 export function CodeAttempts({
   attempts,
-  streamed
+  streamed,
+  language = "text"
 }: {
   attempts: AttemptEvidence[];
   streamed: Record<number, string>;
+  language?: string;
 }) {
+  const [selectedAttempt, setSelectedAttempt] = useState(0);
   const drafts = useMemo(() => mergeAttempts(attempts, streamed), [attempts, streamed]);
   const initial = drafts[0];
-  const latest = drafts[drafts.length - 1];
+  const latest = drafts.find(attempt => attempt.attempt_no === selectedAttempt) ?? drafts[drafts.length - 1];
   const diff = useMemo(() => buildLineDiff(initial?.code ?? "", latest?.code ?? ""), [initial?.code, latest?.code]);
 
   if (!initial) {
@@ -51,7 +54,7 @@ export function CodeAttempts({
   }
 
   return (
-    <Card className="min-w-0 max-w-full overflow-hidden border-stone-200/80 bg-white/90 shadow-sm">
+    <Card id={attempts[attempts.length - 1]?.output.id} className="min-w-0 max-w-full overflow-hidden border-stone-200/80 bg-white/90 shadow-sm">
       <CardHeader className="flex-row items-start justify-between gap-4 p-5 pb-3">
         <div>
           <CardTitle className="flex items-center gap-2">
@@ -59,6 +62,10 @@ export function CodeAttempts({
             Generated Code
           </CardTitle>
           <CardDescription>Initial, latest, and line-level diff are preserved across repair attempts.</CardDescription>
+          <label className="mt-2 block text-xs text-stone-600">Compare with initial <select aria-label="Code attempt" className="ml-2 rounded border p-1" value={selectedAttempt} onChange={event => setSelectedAttempt(Number(event.target.value))}>
+            <option value={0}>Latest attempt</option>
+            {drafts.map(attempt => <option key={attempt.attempt_no} value={attempt.attempt_no}>Attempt {attempt.attempt_no}</option>)}
+          </select></label>
         </div>
       </CardHeader>
       <CardContent className="min-w-0 p-5 pt-0">
@@ -72,10 +79,10 @@ export function CodeAttempts({
             </TabsTrigger>
           </TabsList>
           <TabsContent value="initial" className="min-w-0">
-            <CodeBlock label={`Initial generation · attempt ${initial.attempt_no}`} code={initial.code} />
+            <CodeBlock label={`Initial generation · attempt ${initial.attempt_no}`} code={initial.code} language={language} />
           </TabsContent>
           <TabsContent value="latest" className="min-w-0">
-            <CodeBlock label={`Latest generation · attempt ${latest.attempt_no}`} code={latest.code} />
+            <CodeBlock label={`Selected generation · attempt ${latest.attempt_no}`} code={latest.code} language={language} />
           </TabsContent>
           <TabsContent value="diff" className="min-w-0">
             <div className="max-h-[620px] max-w-full overflow-auto rounded-lg border border-stone-800 bg-[#1e1e1e] py-3 text-[13px] leading-6 shadow-inner">
@@ -91,7 +98,7 @@ export function CodeAttempts({
                   key={`${line.type}-${index}-${line.text}`}
                 >
                   <span className="select-none text-stone-500">{line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}</span>
-                  <DiffCode line={line.text || " "} />
+                  <DiffCode line={line.text || " "} language={language} />
                 </div>
               ))}
             </div>
@@ -102,7 +109,7 @@ export function CodeAttempts({
   );
 }
 
-function CodeBlock({ label, code }: { label: string; code: string }) {
+function CodeBlock({ label, code, language }: { label: string; code: string; language: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -120,7 +127,7 @@ function CodeBlock({ label, code }: { label: string; code: string }) {
         </Button>
       </div>
       <SyntaxHighlighter
-        language="python"
+        language={language}
         style={vscDarkPlus}
         codeTagProps={{
           style: {
@@ -149,10 +156,10 @@ function CodeBlock({ label, code }: { label: string; code: string }) {
   );
 }
 
-function DiffCode({ line }: { line: string }) {
+function DiffCode({ line, language }: { line: string; language: string }) {
   return (
     <SyntaxHighlighter
-      language="python"
+      language={language}
       style={vscDarkPlus}
       PreTag="span"
       CodeTag="span"
@@ -183,7 +190,10 @@ function mergeAttempts(attempts: AttemptEvidence[], streamed: Record<number, str
     map.set(attempt.output.attempt_no, attempt.output.code);
   }
   for (const [attemptNo, code] of Object.entries(streamed)) {
-    if (code.trim()) map.set(Number(attemptNo), code);
+    if (code.trim() && !map.has(Number(attemptNo))) {
+      const artifact = code.match(/```[^\n]*\n([\s\S]*?)(?:```|$)/);
+      map.set(Number(attemptNo), artifact?.[1] ?? code);
+    }
   }
   return Array.from(map.entries())
     .sort(([a], [b]) => a - b)
@@ -193,6 +203,7 @@ function mergeAttempts(attempts: AttemptEvidence[], streamed: Record<number, str
 function buildLineDiff(before: string, after: string): DiffLine[] {
   const a = before.split("\n");
   const b = after.split("\n");
+  if (a.length * b.length > 1_000_000) return [...a.map(text => ({ type: "remove" as const, text })), ...b.map(text => ({ type: "add" as const, text }))];
   const rows = a.length + 1;
   const cols = b.length + 1;
   const table = Array.from({ length: rows }, () => Array<number>(cols).fill(0));

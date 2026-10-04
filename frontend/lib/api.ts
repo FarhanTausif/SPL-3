@@ -1,55 +1,5 @@
-export type InferenceResult = {
-  language: string | null;
-  framework: string | null;
-  runtime: string | null;
-  libraries: string[];
-  requirements: string[];
-  uncertain_assumptions: string[];
-  clarification_questions: string[];
-  needs_clarification: boolean;
-};
-
-export type GeneratedOutput = {
-  id: string | null;
-  attempt_no: number;
-  code: string;
-  explanation: string;
-  provider: string;
-  entropy_summary: Record<string, unknown>;
-  logprob_summary: Record<string, unknown>;
-};
-
-export type PolicyDecision = {
-  decision: string;
-  reason: string;
-};
-
-export type RunSummary = {
-  id: string;
-  status: string;
-  prompt: string;
-  inferred: InferenceResult;
-  model_name: string;
-  max_retry: number;
-  final_output: GeneratedOutput | null;
-  policy_decision: PolicyDecision | null;
-};
-
-export type AttemptEvidence = {
-  output: GeneratedOutput;
-  claims: Array<{ id: string | null; claim_type: string; claim_text: string; location: string; status: string }>;
-  static_findings: Array<{ rule_id: string; severity: string; message: string; location: string; evidence_source: string }>;
-  metrics: { mihn: number; mahr: number; tr_s: number; entropy_score: number; hallucination_risk_score: number };
-  judge_results: Array<{ judge_name: string; judge_model: string; verdict: string; score: number; explanation: string; rubric_json: Record<string, unknown> }>;
-  judge_consensus: { final_verdict: string; average_score: number; agreement_level: string; summary: string };
-  cove_results: Array<{ claim_id: string | null; verdict: string; evidence: string; confidence: number }>;
-  policy: PolicyDecision;
-};
-
-export type RunEvidence = {
-  run: RunSummary;
-  attempts: AttemptEvidence[];
-};
+import type { RunCreate, RunSummary, RunEvidence, AttemptEvidence, InferenceResult } from "./contracts.generated";
+export type { RunCreate, RunSummary, RunEvidence, AttemptEvidence, InferenceResult, GeneratedOutput, PolicyDecision } from "./contracts.generated";
 
 export type WorkflowStageKey =
   | "intake"
@@ -75,11 +25,13 @@ export type RunStreamEvent =
   | { type: "token"; attempt_no: number; text: string }
   | { type: "attempt_completed"; attempt: AttemptEvidence }
   | { type: "run_completed"; run: RunSummary; evidence: RunEvidence }
+  | { type: "context"; inferred: InferenceResult }
+  | { type: "run_cancelled" | "run_interrupted" | "run_resumed" }
   | { type: "error"; message: string };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-export async function createRun(payload: { prompt: string; language_hint?: string; max_retry: number; constraints: string[] }) {
+export async function createRun(payload: RunCreate) {
   const response = await fetch(`${API_BASE}/api/runs`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -108,36 +60,71 @@ export async function streamRun(
     headers: { accept: "text/event-stream", "content-type": "application/json" },
     body: JSON.stringify({ prompt: payload.prompt, constraints: payload.constraints ?? [] })
   });
-  if (!response.ok || !response.body) {
-    throw new Error(await response.text());
-  }
+  await readEventStream(response, onEvent);
+}
 
+export const terminalStatuses = new Set(["completed", "rejected", "reject", "failed", "cancelled", "interrupted", "needs_clarification"]);
+
+async function api<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}/api${path}`, { cache: "no-store", ...(body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<T>;
+}
+export const listRuns = () => api<RunSummary[]>("/runs");
+export const getRun = (id: string) => api<RunSummary>(`/runs/${id}`);
+export const cancelRun = (id: string) => api<RunSummary>(`/runs/${id}/cancel`, {});
+export const clarifyRun = (id: string, answers: string) => api<RunSummary>(`/runs/${id}/clarification`, { answers });
+export const exportUrl = (id: string) => `${API_BASE}/api/runs/${id}/export`;
+export const getHealth = () => api<import("./contracts.generated").HealthResponse>("/health");
+
+export async function readEventStream(response: Response, onEvent: (event: RunStreamEvent & { sequence?: number }) => void, signal?: AbortSignal) {
+  if (!response.ok || !response.body) throw new Error(await response.text());
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() ?? "";
-    for (const frame of frames) {
-      const payloadLines = frame
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim());
-      if (payloadLines.length === 0) continue;
-      onEvent(JSON.parse(payloadLines.join("\n")) as RunStreamEvent);
+  const parse = (frame: string) => {
+    const data = frame.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
+    if (data) onEvent(JSON.parse(data));
+  };
+  try {
+    while (!signal?.aborted) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+      frames.forEach(parse);
     }
-  }
+    buffer += decoder.decode();
+    if (buffer.trim() && !signal?.aborted) parse(buffer);
+  } finally { await reader.cancel(); reader.releaseLock(); }
+}
 
-  if (buffer.trim()) {
-    const data = buffer
-      .split("\n")
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trim())
-      .join("\n");
-    if (data) onEvent(JSON.parse(data) as RunStreamEvent);
+export async function watchRun(id: string, onEvent: (event: RunStreamEvent) => void, signal: AbortSignal, onReconnect?: () => void) {
+  let sequence = 0;
+  let retries = 0;
+  while (!signal.aborted) {
+    try {
+      const response = await fetch(`${API_BASE}/api/runs/${id}/events?after=${sequence}`, { signal, headers: { accept: "text/event-stream" } });
+      await readEventStream(response, event => {
+        if (event.sequence && event.sequence <= sequence) return;
+        sequence = event.sequence ?? sequence;
+        retries = 0;
+        onEvent(event);
+      }, signal);
+      if (signal.aborted) return;
+      const run = await getRun(id);
+      if (terminalStatuses.has(run.status)) return;
+    } catch (error) {
+      if (signal.aborted) return;
+      if (++retries > 10) throw error;
+    }
+    onReconnect?.();
+    await new Promise<void>(resolve => {
+      const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
+      const timer = setTimeout(finish, Math.min(500 * 2 ** retries, 5000));
+      signal.addEventListener("abort", finish, { once: true });
+    });
   }
 }
