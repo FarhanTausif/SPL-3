@@ -31,3 +31,20 @@ describe("api types smoke test", () => {
     expect(events[1]).toMatchObject({ type: "error", message: "stop" });
   });
 });
+
+import { readEventStream } from "./api";
+
+it("handles split UTF-8, CRLF boundaries, IDs and heartbeats", async () => {
+  const encoder = new TextEncoder();
+  const raw = encoder.encode('id: 1\r\ndata: {"type":"token","sequence":1,"attempt_no":1,"text":"বাংলা"}\r\n\r\n: heartbeat\r\n\r\n');
+  const events: RunStreamEvent[] = [];
+  const body = new ReadableStream({ start(controller) { for (const byte of raw) controller.enqueue(new Uint8Array([byte])); controller.close(); } });
+  await readEventStream(new Response(body), event => events.push(event));
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ text: "বাংলা", sequence: 1 });
+});
+
+it("reports malformed event payloads", async () => {
+  const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("data: invalid\n\n")); controller.close(); } });
+  await expect(readEventStream(new Response(body), () => {})).rejects.toThrow();
+});

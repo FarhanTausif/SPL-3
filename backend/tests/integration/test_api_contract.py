@@ -28,7 +28,7 @@ def test_pipeline_persists_complete_run(monkeypatch) -> None:
         )
         evidence = DeHaluPipeline(db).get_evidence(result.id)
 
-    assert result.status in {"reject", "completed"}
+    assert result.status in {"rejected", "completed"}
     assert evidence is not None
     assert evidence.attempts
     assert evidence.attempts[0].judge_results
@@ -50,4 +50,4 @@ def test_stream_pipeline_emits_tokens_and_completion(monkeypatch) -> None:
 
     assert any(event["type"] == "token" and event["attempt_no"] == 1 for event in events)
     assert events[-1]["type"] == "run_completed"
-    assert events[-1]["evidence"].attempts[0].output.code.startswith("def add")
+    assert events[-1]["evidence"]["attempts"][0]["output"]["code"].startswith("def add")

@@ -8,7 +8,7 @@ from dehalu.api.schemas import JudgeResult
 from dehalu.api.schemas import CoVeResult, JudgeConsensus, MetricResult, StaticFinding
 
 
-def test_fake_import_triggers_symbol_finding_and_metrics() -> None:
+def test_unknown_import_and_undefined_data_produce_evidence() -> None:
     code = "import fake_lib_404\n\nresult = fake_lib_404.magic_call(data)\n"
     claims = extract_claims(code)
     findings = run_static_analysis(code, "python")
@@ -75,7 +75,7 @@ def test_policy_warns_after_retry_when_only_soft_risk_remains() -> None:
     assert policy.decision == "warn"
 
 
-def test_policy_repairs_first_when_soft_risk_and_retry_remains() -> None:
+def test_policy_warns_without_spending_repairs_on_missing_evidence() -> None:
     policy = decide_policy(
         findings=[
             StaticFinding(
@@ -92,7 +92,7 @@ def test_policy_repairs_first_when_soft_risk_and_retry_remains() -> None:
         can_repair=True,
     )
 
-    assert policy.decision == "repair"
+    assert policy.decision == "warn"
 
 
 def test_policy_still_rejects_fake_import_after_retry_limit() -> None:
@@ -115,9 +115,9 @@ def test_policy_still_rejects_fake_import_after_retry_limit() -> None:
     assert policy.decision == "reject"
 
 
-def test_cove_maps_claim_statuses() -> None:
+def test_cove_does_not_infer_nonexistence_from_a_package_name() -> None:
     claims = extract_claims("import fake_lib_404\n")
     findings = validate_symbols("import fake_lib_404\n", "python", claims)
     cove = run_cove(claims, findings)
 
-    assert cove[0].verdict == "unsupported"
+    assert cove[0].verdict == "uncertain"
