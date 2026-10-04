@@ -129,3 +129,21 @@ PYTHONPATH=backend/src backend/.venv/bin/python backend/scripts/generate_contrac
 Judge model defaults now use `gemini-flash-latest`, `openai/gpt-oss-20b`, and `mistral-small-latest`. Existing `.env` values take precedence; update retired model names there. Provider catalog visibility does not guarantee generation quota or model access. These failures are shown explicitly in judge evidence and prevent unrestricted acceptance.
 
 Use `PYTHONPATH=src .venv/bin/python scripts/provider_readiness.py` from `backend` to check authenticated model catalogs without displaying credentials. `scripts/smoke_live.py` performs real provider calls; use a disposable, migrated `DATABASE_URL` for that check.
+
+## Frontend workspace checks
+
+The workspace uses bundled Geist fonts, a searchable history sidebar, and Code/Evidence views with a shared attempt selector. Advanced options preserve language, framework, runtime, libraries, constraints, and repair settings. Ctrl/Cmd+Enter submits a prompt. New run leaves background work running; Cancel explicitly stops it.
+
+Run focused frontend checks from `frontend`:
+
+```bash
+npm test
+npm run lint
+npx tsc --noEmit
+npm run build
+DEHALU_NEXT_DIST_DIR=.next-check npm run build
+npx playwright install chromium
+npm run test:browser
+```
+
+Browser checks use mocked API/SSE responses, an isolated build, and port 3001. They do not call paid providers or execute generated code. Screenshots and failure traces are written to `/tmp/dehalu-ui-checks`. The checked widths are 360, 768, 1280, and 1440 pixels. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an existing local Chromium binary.
