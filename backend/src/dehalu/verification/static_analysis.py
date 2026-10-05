@@ -1,131 +1,55 @@
 from __future__ import annotations
-
-import ast
-import re
+import json
+import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from dehalu.domain.models import AnalyzerCoverage, StaticFinding
+from dehalu.verification.adapters import get_adapter, normalize
 
-from dehalu.api.schemas import StaticFinding
+RULES = Path(__file__).parent / 'rules'
 
 
-RISKY_PATTERNS = {
-    "unsafe-shell": [r"\bos\.system\s*\(", r"\bsubprocess\.", r"\bexec\s*\(", r"\beval\s*\("],
-    "unsafe-file-delete": [r"\brm\s+-rf\b", r"\bunlink\s*\(", r"\brmtree\s*\("],
-    "unsafe-network": [r"\brequests\.", r"\bfetch\s*\(", r"\bhttpx\."],
-    "secret-handling": [r"api[_-]?key\s*=", r"password\s*=", r"token\s*="],
-}
+def analyze(code: str, language: str) -> tuple[dict[str, list[StaticFinding]], list[AnalyzerCoverage]]:
+    language = normalize(language)
+    adapter = get_adapter(language)
+    parsed, coverage = adapter.parse(code) if adapter else ([], AnalyzerCoverage(analyzer='parser', language=language, status='unavailable', detail='No installed grammar adapter'))
+    sast, scan_coverage = scan(code, language)
+    return {'tree_sitter': parsed, 'semgrep': sast}, [coverage, scan_coverage, *([adapter.coverage()[1]] if adapter else [])]
+
+
+def scan(code: str, language: str) -> tuple[list[StaticFinding], AnalyzerCoverage]:
+    binary = shutil.which('semgrep') or str(Path(os.sys.executable).parent / 'semgrep')
+    if not Path(binary).is_file():
+        return [], AnalyzerCoverage(analyzer='semgrep', language=language, status='unavailable', detail='Semgrep not installed')
+    suffix = {'python': '.py', 'javascript': '.jsx', 'typescript': '.tsx', 'java': '.java', 'go': '.go', 'rust': '.rs', 'c': '.c', 'cpp': '.cpp'}.get(language)
+    if not suffix:
+        return [], AnalyzerCoverage(analyzer='semgrep', language=language, status='unavailable', detail='No rules for target language')
+    with tempfile.TemporaryDirectory(prefix='dehalu-') as directory:
+        path = Path(directory) / ('snippet' + suffix)
+        path.write_text(code)
+        try:
+            # Explicit target/config, no registry, autofix, execution, dependency builds, or telemetry.
+            env = {**os.environ, 'SEMGREP_SEND_METRICS': 'off', 'SEMGREP_ENABLE_VERSION_CHECK': '0', 'XDG_CONFIG_HOME': directory}
+            result = subprocess.run([binary, 'scan', '--config', str(RULES), '--no-rewrite-rule-ids', '--json', '--metrics=off', '--disable-version-check', '--disable-nosem', '--no-git-ignore', '--quiet', str(path)], cwd=directory, env=env, capture_output=True, text=True, timeout=45)
+            payload = json.loads(result.stdout)
+            findings = []
+            for item in payload.get('results', []):
+                extra = item.get('extra', {})
+                start, end = item['start'], item['end']
+                findings.append(StaticFinding(rule_id=item['check_id'], severity={'ERROR': 'error', 'WARNING': 'warning', 'INFO': 'info'}.get(extra.get('severity'), 'warning'), message=extra.get('message', 'Static rule match'), location=f"line {start['line']}", source_range={'start_line': start['line'], 'start_column': start['col'], 'end_line': end['line'], 'end_column': end['col']}, evidence_source='Semgrep 1.136.0 / local rules 2.0'))
+            errors = payload.get('errors', [])
+            status = 'failed' if result.returncode not in {0, 1} else 'partial' if errors else 'available'
+            return findings, AnalyzerCoverage(analyzer='semgrep', language=language, status=status, detail='Local rules completed' if not errors else str(errors)[:500], version='1.136.0/rules-2.0')
+        except (subprocess.TimeoutExpired, ValueError, OSError) as exc:
+            return [], AnalyzerCoverage(analyzer='semgrep', language=language, status='failed', detail=f'Scan failed: {type(exc).__name__}')
+
+
+def run_static_analysis_by_stage(code: str, language: str) -> dict[str, list[StaticFinding]]:
+    return analyze(code, language)[0]
 
 
 def run_static_analysis(code: str, language: str) -> list[StaticFinding]:
-    findings: list[StaticFinding] = []
-    findings.extend(_tree_sitter_or_fallback(code, language))
-    findings.extend(_semgrep_or_fallback(code, language))
-    findings.extend(_generic_quality_checks(code))
-    return findings
-
-
-def _tree_sitter_or_fallback(code: str, language: str) -> list[StaticFinding]:
-    if language.lower() == "python":
-        try:
-            ast.parse(code)
-        except SyntaxError as exc:
-            return [
-                StaticFinding(
-                    rule_id="tree-sitter.syntax",
-                    severity="error",
-                    message=f"Syntax or incomplete-code finding: {exc.msg}",
-                    location=f"line {exc.lineno or 1}",
-                    evidence_source="Tree-sitter/AST fallback",
-                )
-            ]
-    stack = []
-    pairs = {")": "(", "]": "[", "}": "{"}
-    for index, char in enumerate(code):
-        if char in "([{":
-            stack.append(char)
-        elif char in ")]}":
-            if not stack or stack.pop() != pairs[char]:
-                return [
-                    StaticFinding(
-                        rule_id="tree-sitter.structure",
-                        severity="error",
-                        message="Unbalanced or malformed delimiter structure detected.",
-                        location=f"offset {index}",
-                        evidence_source="Tree-sitter/generic fallback",
-                    )
-                ]
-    if stack:
-        return [
-            StaticFinding(
-                rule_id="tree-sitter.incomplete",
-                severity="error",
-                message="Incomplete code structure detected from unclosed delimiters.",
-                location="end of file",
-                evidence_source="Tree-sitter/generic fallback",
-            )
-        ]
-    return []
-
-
-def _semgrep_or_fallback(code: str, language: str) -> list[StaticFinding]:
-    if shutil.which("semgrep"):
-        suffix = {
-            "python": ".py",
-            "javascript": ".js",
-            "typescript": ".ts",
-            "java": ".java",
-            "go": ".go",
-            "rust": ".rs",
-        }.get(language.lower(), ".txt")
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / f"snippet{suffix}"
-            path.write_text(code, encoding="utf-8")
-            result = subprocess.run(
-                ["semgrep", "--config", "auto", "--json", str(path)],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-            if result.returncode in {0, 1} and result.stdout:
-                return [
-                    StaticFinding(
-                        rule_id="semgrep.scan",
-                        severity="info",
-                        message="Semgrep completed; inspect raw scanner output in logs if enabled.",
-                        location="snippet",
-                        evidence_source="Semgrep/SAST",
-                    )
-                ]
-    findings: list[StaticFinding] = []
-    for rule_id, patterns in RISKY_PATTERNS.items():
-        for pattern in patterns:
-            for match in re.finditer(pattern, code, flags=re.I):
-                line = code[: match.start()].count("\n") + 1
-                findings.append(
-                    StaticFinding(
-                        rule_id=f"semgrep.{rule_id}",
-                        severity="warning" if rule_id != "unsafe-shell" else "error",
-                        message=f"Static unsafe-pattern finding for `{match.group(0)}`.",
-                        location=f"line {line}",
-                        evidence_source="Semgrep/SAST fallback",
-                    )
-                )
-    return findings
-
-
-def _generic_quality_checks(code: str) -> list[StaticFinding]:
-    findings: list[StaticFinding] = []
-    if "TODO" in code or "pass\n" in code:
-        findings.append(
-            StaticFinding(
-                rule_id="quality.incomplete-placeholder",
-                severity="warning",
-                message="Placeholder or incomplete implementation marker detected.",
-                location="snippet",
-                evidence_source="Static quality heuristic",
-            )
-        )
-    return findings
+    staged = run_static_analysis_by_stage(code, language)
+    return staged['tree_sitter'] + staged['semgrep']

@@ -8,7 +8,7 @@ from dehalu.core.settings import settings
 from dehalu.state.database import create_tables
 
 
-def create_app(create_schema_on_startup: bool = True) -> FastAPI:
+def create_app(create_schema_on_startup: bool = False) -> FastAPI:
     app = FastAPI(title="DeHalu API", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,

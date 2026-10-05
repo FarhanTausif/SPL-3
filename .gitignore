@@ -29,3 +29,8 @@ __pycache__/
 # dependency lockfiles
 package-lock.json
 frontend/package-lock.json
+
+# Isolated frontend browser-check build
+frontend/.next-check/
+frontend/playwright-report/
+frontend/test-results/

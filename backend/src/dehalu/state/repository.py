@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session, selectinload
 
 from dehalu.api.schemas import (
@@ -31,6 +31,7 @@ from dehalu.state.models import (
     RunRecord,
     SessionRecord,
     StaticFindingRecord,
+    RunJobRecord, RunEventRecord,
 )
 
 
@@ -65,6 +66,7 @@ class RunRepository:
         evidence: AttemptEvidence,
     ) -> GeneratedOutputRecord:
         output = GeneratedOutputRecord(
+            id=UUID(evidence.output.id),
             run_id=run.id,
             attempt_no=evidence.output.attempt_no,
             code=evidence.output.code,
@@ -75,9 +77,10 @@ class RunRepository:
         )
         self.db.add(output)
         self.db.flush()
-        claim_id_map: dict[int, UUID] = {}
+        claim_id_map: dict[str, UUID] = {}
         for index, claim in enumerate(evidence.claims):
             record = ClaimRecord(
+                id=UUID(claim.id),
                 output_id=output.id,
                 claim_type=claim.claim_type,
                 claim_text=claim.claim_text,
@@ -87,11 +90,12 @@ class RunRepository:
             self.db.add(record)
             self.db.flush()
             claim.id = str(record.id)
-            claim_id_map[index] = record.id
+            claim_id_map[claim.id] = record.id
 
         for finding in evidence.static_findings:
             self.db.add(
                 StaticFindingRecord(
+                    id=UUID(finding.id),
                     output_id=output.id,
                     rule_id=finding.rule_id,
                     severity=finding.severity,
@@ -116,7 +120,7 @@ class RunRepository:
                     output_id=output.id,
                     judge_name=judge.judge_name,
                     judge_model=judge.judge_model,
-                    verdict=judge.verdict,
+                    verdict=judge.verdict or "unavailable",
                     score=judge.score,
                     rubric_json=judge.rubric_json,
                     explanation=judge.explanation,
@@ -135,7 +139,7 @@ class RunRepository:
             self.db.add(
                 CoVeResultRecord(
                     output_id=output.id,
-                    claim_id=claim_id_map.get(index) if cove.claim_id is None else None,
+                    claim_id=claim_id_map.get(cove.claim_id),
                     verdict=cove.verdict,
                     evidence=cove.evidence,
                     confidence=cove.confidence,
@@ -150,12 +154,14 @@ class RunRepository:
             )
         )
         evidence.output.id = str(output.id)
+        output.evidence_payload = evidence.model_dump(mode="json")
         self.db.flush()
+        self.db.commit()
         return output
 
     def save_clarification(self, run: RunRecord, reason: str) -> None:
         run.status = "needs_clarification"
-        run.completed_at = datetime.now(timezone.utc)
+        run.completed_at = None
         self.db.add(PolicyDecisionRecord(run_id=run.id, output_id=None, decision="needs_clarification", reason=reason))
         self.db.commit()
 
@@ -165,9 +171,14 @@ class RunRepository:
         self.db.commit()
 
     def get_run(self, run_id: str) -> RunRecord | None:
+        try:
+            parsed_id = UUID(run_id)
+        except ValueError:
+            return None
+        self.db.expire_all()
         statement = (
             select(RunRecord)
-            .where(RunRecord.id == UUID(run_id))
+            .where(RunRecord.id == parsed_id)
             .options(
                 selectinload(RunRecord.outputs).selectinload(GeneratedOutputRecord.claims),
                 selectinload(RunRecord.outputs).selectinload(GeneratedOutputRecord.static_findings),
@@ -195,6 +206,7 @@ def run_to_summary(run: RunRecord) -> RunSummary:
         max_retry=run.max_retry,
         final_output=final_output,
         policy_decision=_policy_to_schema(policy_record) if policy_record else None,
+        created_at=run.created_at, completed_at=run.completed_at, error=run.run_metadata.get("error"),
     )
 
 
@@ -202,10 +214,13 @@ def run_to_evidence(run: RunRecord) -> RunEvidence:
     return RunEvidence(
         run=run_to_summary(run),
         attempts=[_attempt_to_schema(output) for output in sorted(run.outputs, key=lambda item: item.attempt_no)],
+        partial=run.run_metadata.get("partial", {}),
     )
 
 
 def _attempt_to_schema(output: GeneratedOutputRecord) -> AttemptEvidence:
+    if output.evidence_payload:
+        return AttemptEvidence.model_validate(output.evidence_payload)
     policy = sorted(output.policy_decisions, key=lambda item: item.created_at)[-1] if output.policy_decisions else None
     return AttemptEvidence(
         output=_output_to_schema(output),
@@ -215,6 +230,7 @@ def _attempt_to_schema(output: GeneratedOutputRecord) -> AttemptEvidence:
         ],
         static_findings=[
             StaticFinding(
+                id=str(item.id),
                 rule_id=item.rule_id,
                 severity=item.severity,
                 message=item.message,
@@ -227,14 +243,16 @@ def _attempt_to_schema(output: GeneratedOutputRecord) -> AttemptEvidence:
             mihn=output.metric_result.mihn if output.metric_result else 0,
             mahr=output.metric_result.mahr if output.metric_result else 0,
             tr_s=output.metric_result.tr_s if output.metric_result else 0,
-            entropy_score=output.metric_result.entropy_score if output.metric_result else 0,
+            entropy_score=None,
+            version="legacy",
             hallucination_risk_score=output.metric_result.hallucination_risk_score if output.metric_result else 0,
         ),
         judge_results=[
             JudgeResult(
                 judge_name=item.judge_name,
                 judge_model=item.judge_model,
-                verdict=item.verdict,
+                verdict=item.verdict if item.verdict in {"pass", "warn", "fail"} else None,
+                status="unavailable",
                 score=item.score,
                 rubric_json=item.rubric_json,
                 explanation=item.explanation,
@@ -256,8 +274,11 @@ def _attempt_to_schema(output: GeneratedOutputRecord) -> AttemptEvidence:
 
 
 def _output_to_schema(output: GeneratedOutputRecord) -> GeneratedOutput:
+    if output.evidence_payload:
+        return GeneratedOutput.model_validate(output.evidence_payload["output"])
     return GeneratedOutput(
         id=str(output.id),
+        metadata={"provenance": "legacy-prototype"},
         attempt_no=output.attempt_no,
         code=output.code,
         explanation=output.explanation,
@@ -274,4 +295,6 @@ def _latest_policy(run: RunRecord) -> PolicyDecisionRecord | None:
 
 
 def _policy_to_schema(policy: PolicyDecisionRecord) -> PolicyDecision:
+    if policy.output is not None and policy.output.evidence_payload:
+        return PolicyDecision.model_validate(policy.output.evidence_payload["policy"])
     return PolicyDecision(decision=policy.decision, reason=policy.reason)

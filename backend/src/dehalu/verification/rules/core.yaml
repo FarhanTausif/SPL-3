@@ -1,0 +1,77 @@
+rules:
+  - id: semgrep.unsafe-shell
+    languages: [python]
+    message: Shell execution can permit injection; use a structured argument list and avoid shell=True.
+    severity: ERROR
+    pattern-either:
+      - pattern: os.system(...)
+      - pattern: subprocess.$F(..., shell=True, ...)
+  - id: semgrep.unsafe-evaluation
+    languages: [python, javascript, typescript]
+    message: Dynamic evaluation of code requires removal or an explicit safe alternative.
+    severity: ERROR
+    pattern-either:
+      - pattern: eval(...)
+  - id: semgrep.python-exec
+    languages: [python]
+    message: Dynamic code execution is unsafe.
+    severity: ERROR
+    pattern: exec(...)
+  - id: semgrep.file-delete
+    languages: [python]
+    message: Destructive file operation; verify that deletion is required and paths are constrained.
+    severity: WARNING
+    pattern-either:
+      - pattern: shutil.rmtree(...)
+      - pattern: os.remove(...)
+      - pattern: os.unlink(...)
+  - id: semgrep.resource-open
+    languages: [python]
+    message: File handle opened outside a context manager; verify resource cleanup.
+    severity: WARNING
+    patterns:
+      - pattern: $F = open(...)
+      - pattern-not-inside: |
+          with open(...) as $F:
+            ...
+  - id: semgrep.incomplete-function
+    languages: [python]
+    message: Function body is an unimplemented placeholder.
+    severity: WARNING
+    pattern: |
+      def $F(...):
+        pass
+  - id: semgrep.hardcoded-credential
+    languages: [generic]
+    message: Embedded credential literal; use externally configured credentials.
+    severity: ERROR
+    pattern-regex: '(?i)(?:api_key|password|access_token)\s*=\s*["\x27][A-Za-z0-9_/-]{8,}["\x27]'
+  - id: semgrep.c-unsafe-copy
+    languages: [c, cpp]
+    message: Unbounded buffer write; use bounds-checked operations.
+    severity: ERROR
+    pattern-either:
+      - pattern: strcpy(...)
+      - pattern: gets(...)
+  - id: semgrep.javascript-shell
+    languages: [javascript, typescript]
+    message: Shell command execution needs a non-shell alternative and constrained inputs.
+    severity: WARNING
+    pattern-either:
+      - pattern: $CP.exec(...)
+      - pattern: $CP.execSync(...)
+  - id: semgrep.java-process
+    languages: [java]
+    message: Process creation requires explicit task intent and constrained arguments.
+    severity: WARNING
+    pattern: Runtime.getRuntime().exec(...)
+  - id: semgrep.go-command
+    languages: [go]
+    message: Process execution requires explicit task intent and constrained arguments.
+    severity: WARNING
+    pattern: exec.Command(...)
+  - id: semgrep.rust-command
+    languages: [rust]
+    message: Process execution requires explicit task intent and constrained arguments.
+    severity: WARNING
+    pattern: std::process::Command::new(...)
