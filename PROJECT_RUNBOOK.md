@@ -68,8 +68,7 @@ pytest
 
 ```bash
 cd frontend
-npm install
-npm run dev
+npm i && npm run dev
 ```
 
 Open `http://localhost:3000`.
