@@ -37,7 +37,7 @@ def enqueue(db: Session, request: RunCreate):
     repo = RunRepository(db)
     run = repo.create_run(request.prompt, settings.ollama_model, request.max_retry if request.max_retry is not None else settings.default_max_retry, inference)
     run.status = 'queued'
-    run.run_metadata = {**run.run_metadata, 'request': request.model_dump(), 'config': {'model': settings.ollama_model, 'max_retry': run.max_retry, 'metric_version': '2.0', 'catalog_version': '2026.1', 'fake_mode': settings.allow_fake_llm, 'package_lookups': settings.package_lookups}, 'provenance': 'implementation-v2'}
+    run.run_metadata = {**run.run_metadata, 'request': request.model_dump(), 'config': {'model': settings.ollama_model, 'max_retry': run.max_retry, 'metric_version': '2.1', 'catalog_version': '2026.1', 'fake_mode': settings.allow_fake_llm, 'package_lookups': settings.package_lookups}, 'provenance': 'implementation-v2'}
     db.add(RunJobRecord(run_id=run.id, status='queued'))
     journal(db, str(run.id), {'type': 'run_created', 'inferred': inference.model_dump(), 'model_name': run.model_name})
     return run_to_summary(repo.get_run(str(run.id)))
@@ -87,15 +87,15 @@ def cancel(db: Session, run_id: str):
     journal(db, run_id, {'type': 'run_cancelled'}, allow_terminal=True)
 
 
-def resume(db: Session, run_id: str, answers: str, language_hint: str | None):
+def resume(db: Session, run_id: str, answers: str, language_hint: str | None, skip_clarification: bool = False):
     run = db.scalar(select(RunRecord).where(RunRecord.id == UUID(run_id)).with_for_update().execution_options(populate_existing=True))
     if run.status != 'needs_clarification':
         db.rollback()
         raise ValueError('Run is not waiting for clarification')
     request = RunCreate.model_validate(run.run_metadata['request'])
-    request.prompt += '\nClarification: ' + answers
+    if answers.strip(): request.prompt += '\nClarification: ' + answers
     if language_hint: request.language_hint = language_hint
-    run.run_metadata = {**run.run_metadata, 'request': request.model_dump(), 'error': None}
+    run.run_metadata = {**run.run_metadata, 'request': request.model_dump(), 'error': None, 'clarification_completed': True, 'skip_clarification': skip_clarification}
     run.status = 'queued'
     run.completed_at = None
     db.execute(update(RunJobRecord).where(RunJobRecord.run_id == run.id).values(status='queued', owner=None, lease_until=None))

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ArrowUpRight, ChevronDown, Info, Search } from "lucide-react";
 import type { RunEvidence, AttemptEvidence } from "@/lib/api";
 import type { Claim, StaticFinding } from "@/lib/contracts.generated";
+import { MetricsChart } from "./MetricsChart";
 import { MarkdownText } from "./MarkdownText";
 import { StatusBadge } from "./StatusBadge";
 import { Button } from "./ui/button";
@@ -17,7 +18,8 @@ const help: Record<string, string> = {
   MiHN: "Number of unsupported claims. Lower is better.",
   MaHR: "Fraction of unsupported and uncertain claims. Lower is better; zero claims does not establish coverage.",
   "TR-S": "Structural repetition score. Lower indicates less repetition.",
-  Entropy: "Measured model uncertainty, available only when the generator supplies suitable data.",
+  "Estimated token entropy":
+    "Normalized entropy from the top five token probabilities plus grouped remaining mass. A lower bound on full-distribution entropy; measured over the full generated response.",
   Risk: "Comparative evidence-based risk score. This is not a probability of incorrect code.",
   "Judge average": "Average score across valid judge responses, from 0 to 1. Higher is better."
 };
@@ -408,7 +410,10 @@ export function EvidencePanel({
                   {Object.keys(j.rubric_json).length > 0 && (
                     <div className="mt-4 divide-y border-t">
                       {Object.entries(j.rubric_json).map(([key, raw]) => {
-                        const rubric = raw as { score?: number; evidence?: string[] };
+                        const rubric = raw as {
+                          score?: number;
+                          evidence?: string[];
+                        };
                         return (
                           <div key={key} className="py-3">
                             <div className="flex justify-between gap-2 text-sm">
@@ -565,6 +570,7 @@ function MetricsTable({ attempts }: { attempts: AttemptEvidence[] }) {
     );
   return (
     <>
+      <MetricsChart attempts={attempts} />
       <p className="mb-3 text-xs text-muted-foreground">
         Compare completed attempts. Missing measurements are unavailable, rather than zero.
       </p>
@@ -624,6 +630,24 @@ function MetricsTable({ attempts }: { attempts: AttemptEvidence[] }) {
           ))}
         </TableBody>
       </Table>
+      <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+        {attempts.map((attempt) => {
+          const entropy = attempt.output.entropy_summary as {
+            mean_nats?: number;
+            measured_tokens?: number;
+            generated_tokens?: number;
+            reason?: string;
+          };
+          return (
+            <p key={attempt.output.id}>
+              Attempt {attempt.output.attempt_no} entropy:{" "}
+              {entropy.mean_nats != null
+                ? `${entropy.mean_nats.toFixed(3)} nats · ${entropy.measured_tokens ?? 0}/${entropy.generated_tokens ?? "?"} tokens measured. ${entropy.reason ?? ""}`
+                : (entropy.reason ?? "Token probabilities were not supplied for this attempt.")}
+            </p>
+          );
+        })}
+      </div>
       <p className="mt-3 text-xs text-muted-foreground">
         {attempts.some((a) => !a.metrics.total_claims)
           ? "Zero claims: coverage is insufficient to establish support. "

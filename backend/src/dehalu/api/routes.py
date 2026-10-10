@@ -87,7 +87,7 @@ def cancel_run(run_id: UUID, db: Session = Depends(get_session)):
 @router.post('/runs/{run_id}/clarification', response_model=RunSummary, status_code=202)
 def clarify(run_id: UUID, answers: ClarificationAnswers, db: Session = Depends(get_session)):
     require_run(db, run_id)
-    try: resume(db, str(run_id), answers.answers, answers.language_hint)
+    try: resume(db, str(run_id), answers.answers, answers.language_hint, answers.skip_clarification)
     except ValueError as exc: raise HTTPException(409, str(exc)) from exc
     return DeHaluPipeline(db).get_run(str(run_id))
 

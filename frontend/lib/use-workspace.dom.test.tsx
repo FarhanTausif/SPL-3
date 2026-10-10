@@ -96,7 +96,7 @@ describe("durable workspace lifecycle", () => {
     await act(async () => {
       await result.current.clarify("Python 3.11");
     });
-    expect(api.clarifyRun).toHaveBeenCalledWith("run-1", "Python 3.11");
+    expect(api.clarifyRun).toHaveBeenCalledWith("run-1", "Python 3.11", false);
     vi.mocked(api.cancelRun).mockResolvedValue(makeRun({ status: "cancelled" }));
     vi.mocked(api.getEvidence).mockResolvedValue(
       makeEvidence({ run: makeRun({ status: "cancelled" }) })
@@ -129,4 +129,26 @@ it("does not let a late checkpoint erase a newly completed attempt", async () =>
   act(() => emit({ type: "attempt_completed", attempt: makeAttempt(2) }));
   await act(async () => finish(makeEvidence({ run: makeRun({ status: "running" }) })));
   expect(result.current.attempts.map((attempt) => attempt.output.attempt_no)).toEqual([1, 2]);
+});
+
+it("replaces invalid generation tokens after a format recovery reset", async () => {
+  let emit: Parameters<typeof api.watchRun>[1] | undefined;
+  localStorage.setItem("dehalu-active-run", "run-1");
+  vi.mocked(api.getEvidence).mockResolvedValue(
+    makeEvidence({ run: makeRun({ status: "running" }) })
+  );
+  vi.mocked(api.watchRun).mockImplementation((_id, callback, signal) => {
+    emit = callback;
+    return new Promise((resolve) =>
+      signal.addEventListener("abort", () => resolve(), { once: true })
+    );
+  });
+  const { result } = renderHook(() => useWorkspace());
+  await waitFor(() => expect(emit).toBeDefined());
+  act(() => {
+    emit!({ type: "token", attempt_no: 2, text: "Old invalid response" });
+    emit!({ type: "generation_reset", attempt_no: 2 });
+    emit!({ type: "token", attempt_no: 2, text: "```python\ndef repaired(): pass\n```" });
+  });
+  expect(result.current.streamed[2]).toBe("```python\ndef repaired(): pass\n```");
 });

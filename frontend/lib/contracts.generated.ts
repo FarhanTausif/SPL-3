@@ -33,8 +33,20 @@ export type Claim = {
 };
 
 export type ClarificationAnswers = {
-  answers: string;
+  answers?: string;
   language_hint?: string | null;
+  skip_clarification?: boolean;
+};
+
+export type ClarificationChoice = {
+  label: string;
+  value: string;
+  recommended: boolean;
+};
+
+export type ClarificationQuestion = {
+  question: string;
+  choices: Array<ClarificationChoice>;
 };
 
 export type CoVeResult = {
@@ -80,6 +92,7 @@ export type InferenceResult = {
   uncertain_assumptions: Array<string>;
   clarification_questions: Array<string>;
   needs_clarification: boolean;
+  clarification_details: Array<ClarificationQuestion>;
 };
 
 export type JudgeConsensus = {

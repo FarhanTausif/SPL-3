@@ -1,15 +1,18 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Code2, Copy, GitCompareArrows } from "lucide-react";
+import { Check, Code2, Copy, GitCompareArrows } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import type { AttemptEvidence } from "@/lib/api";
 import { buildLineDiff, mergeAttempts } from "@/lib/code";
 import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
-import { MarkdownText } from "./MarkdownText";
-export type SourceTarget = { attempt: number; start: number; end: number; nonce: number };
+export type SourceTarget = {
+  attempt: number;
+  start: number;
+  end: number;
+  nonce: number;
+};
 export function CodeAttempts({
   attempts,
   streamed,
@@ -101,10 +104,6 @@ export function CodeAttempts({
             <span className="font-mono text-xs text-muted-foreground">
               {language} · attempt {selected.attempt_no}
             </span>
-            <Button variant="outline" size="sm" onClick={copy} aria-label="Copy code">
-              {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-              {copied ? "Copied" : "Copy"}
-            </Button>
           </div>
         </div>
         {copyError && (
@@ -118,6 +117,16 @@ export function CodeAttempts({
               <span className="size-1.5 rounded-full bg-emerald-500" />
               {output ? "Generated artifact" : "Streaming generation"}
               <span className="ml-auto">{selected.code.split("\n").length} lines</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={copy}
+                aria-label="Copy code"
+                className="shrink-0 text-zinc-200 hover:bg-zinc-800 hover:text-white"
+              >
+                {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                {copied ? "Copied" : "Copy code"}
+              </Button>
             </div>
             <SyntaxHighlighter
               language={language === "cpp" ? "cpp" : language}
@@ -180,17 +189,6 @@ export function CodeAttempts({
           </div>
         </TabsContent>
       </Tabs>
-      {output?.explanation && (
-        <Collapsible className="mt-4 rounded-lg border bg-card">
-          <CollapsibleTrigger className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium">
-            Generation explanation
-            <ChevronDown className="size-4" />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="border-t px-4 py-3">
-            <MarkdownText>{output.explanation}</MarkdownText>
-          </CollapsibleContent>
-        </Collapsible>
-      )}
     </section>
   );
 }

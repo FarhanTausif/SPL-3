@@ -38,9 +38,15 @@ export function ResultPanel({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold">
-            {decision ? "Verification decision" : "Run status"}
+            {run.status === "failed"
+              ? "Run failed"
+              : decision
+                ? "Verification decision"
+                : "Run status"}
           </h2>
-          <StatusBadge value={decision?.decision ?? run.status} />
+          <StatusBadge
+            value={run.status === "failed" ? "failed" : (decision?.decision ?? run.status)}
+          />
         </div>
         <div className="mt-1 text-sm">
           <MarkdownText>

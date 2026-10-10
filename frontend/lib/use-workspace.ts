@@ -86,12 +86,19 @@ export function workspaceReducer(state: WorkspaceState, action: Action): Workspa
       );
     next.stages = next.stages.map((s) =>
       s.key === event.stage
-        ? { ...s, status: event.status, progress: event.progress, attemptNo: event.attempt_no }
+        ? {
+            ...s,
+            status: event.status,
+            progress: event.progress,
+            attemptNo: event.attempt_no
+          }
         : s
     );
     if (next.run && !terminalStatuses.has(next.run.status))
       next.run = { ...next.run, status: "running" };
-  } else if (event.type === "token")
+  } else if (event.type === "generation_reset")
+    next.streamed = { ...state.streamed, [event.attempt_no]: "" };
+  else if (event.type === "token")
     next.streamed = {
       ...state.streamed,
       [event.attempt_no]: (state.streamed[event.attempt_no] ?? "") + event.text
@@ -104,7 +111,12 @@ export function workspaceReducer(state: WorkspaceState, action: Action): Workspa
       event.attempt
     ].sort((a, b) => a.output.attempt_no - b.output.attempt_no);
   else if (event.type === "run_completed")
-    next = { ...next, run: event.run, evidence: event.evidence, attempts: event.evidence.attempts };
+    next = {
+      ...next,
+      run: event.run,
+      evidence: event.evidence,
+      attempts: event.evidence.attempts
+    };
   else if (event.type === "clarification") next.run = event.run;
   else if (event.type === "run_cancelled" || event.type === "run_interrupted") {
     if (state.run)
@@ -177,7 +189,11 @@ export function useWorkspace() {
           },
           controller.signal,
           () => {
-            if (current()) dispatch({ type: "patch", patch: { connection: "reconnecting" } });
+            if (current())
+              dispatch({
+                type: "patch",
+                patch: { connection: "reconnecting" }
+              });
           }
         );
         if (!current()) return;
@@ -252,7 +268,10 @@ export function useWorkspace() {
       const cancelled = await cancelRun(id);
       if (ticket === epoch.current) {
         watcher.current?.abort();
-        dispatch({ type: "patch", patch: { run: cancelled, connection: "idle" } });
+        dispatch({
+          type: "patch",
+          patch: { run: cancelled, connection: "idle" }
+        });
         const evidence = await getEvidence(id);
         if (ticket === epoch.current) {
           dispatch({ type: "snapshot", evidence });
@@ -264,19 +283,21 @@ export function useWorkspace() {
       if (ticket === epoch.current)
         dispatch({
           type: "patch",
-          patch: { error: error instanceof Error ? error.message : "Cancellation failed." }
+          patch: {
+            error: error instanceof Error ? error.message : "Cancellation failed."
+          }
         });
     } finally {
       if (ticket === epoch.current) dispatch({ type: "patch", patch: { actionPending: false } });
     }
   }
-  async function clarify(answers: string) {
+  async function clarify(answers: string, skip = false) {
     if (!state.run) return;
     const id = state.run.id;
     const ticket = epoch.current;
     dispatch({ type: "patch", patch: { actionPending: true, error: null } });
     try {
-      await clarifyRun(id, answers);
+      await clarifyRun(id, answers, skip);
       if (ticket === epoch.current) void openRun(id);
     } catch (error) {
       if (ticket === epoch.current)
@@ -290,7 +311,11 @@ export function useWorkspace() {
     }
   }
   const evidence = state.evidence
-    ? { ...state.evidence, run: state.run ?? state.evidence.run, attempts: state.attempts }
+    ? {
+        ...state.evidence,
+        run: state.run ?? state.evidence.run,
+        attempts: state.attempts
+      }
     : null;
   return {
     ...state,
@@ -305,6 +330,14 @@ export function useWorkspace() {
     cancel,
     clarify,
     refreshHistory,
+    refreshHealth: async () => {
+      try {
+        const next = await getHealth();
+        if (alive.current) setHealth(next);
+      } catch {
+        if (alive.current) setHealth(null);
+      }
+    },
     selectAttempt: (attempt: number | null) => dispatch({ type: "select", attempt })
   };
 }

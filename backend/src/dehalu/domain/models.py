@@ -21,8 +21,32 @@ class RunCreate(BaseModel):
 
 
 class ClarificationAnswers(BaseModel):
-    answers: str = Field(min_length=1, max_length=10000)
+    answers: str = Field(default="", max_length=10000)
     language_hint: str | None = None
+    skip_clarification: bool = False
+
+    @model_validator(mode="after")
+    def answer_or_skip(self):
+        if not self.skip_clarification and not self.answers.strip():
+            raise ValueError("Provide answers or choose Run Anyway")
+        return self
+
+
+class ClarificationChoice(BaseModel):
+    label: str
+    value: str
+    recommended: bool = False
+
+
+class ClarificationQuestion(BaseModel):
+    question: str
+    choices: list[ClarificationChoice] = Field(min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def one_recommendation(self):
+        if sum(choice.recommended for choice in self.choices) != 1:
+            raise ValueError("Exactly one choice must be recommended")
+        return self
 
 
 class InferenceResult(BaseModel):
@@ -35,6 +59,7 @@ class InferenceResult(BaseModel):
     uncertain_assumptions: list[str] = Field(default_factory=list)
     clarification_questions: list[str] = Field(default_factory=list)
     needs_clarification: bool = False
+    clarification_details: list[ClarificationQuestion] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
     def questions_match(self):
@@ -98,7 +123,7 @@ class MetricResult(BaseModel):
     unsupported_count: int = 0
     uncertain_count: int = 0
     total_claims: int = 0
-    version: str = "2.0"
+    version: str = "2.1"
 
 
 class JudgeResult(BaseModel):

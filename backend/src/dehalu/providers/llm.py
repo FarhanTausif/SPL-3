@@ -4,11 +4,14 @@ from dataclasses import dataclass
 import json
 import re
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 import httpx
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from dehalu.domain.models import JudgeResult
 from dehalu.core.settings import Settings
+from dehalu.providers.uncertainty import summarize_logprobs
 
 RUBRIC = ('requirement_alignment', 'functional_logic', 'quality_safety', 'dependency_api_plausibility', 'unsupported_assumptions', 'hallucination_risk')
 
@@ -65,14 +68,23 @@ def validate_artifact(raw: str, expected_language: str | None = None) -> tuple[s
 
 def post_with_retry(settings: Settings, url: str, **kwargs):
     for attempt in range(settings.provider_retries + 1):
+        delay = min(2 ** attempt, 4)
         try:
             response = httpx.post(url, timeout=settings.request_timeout_seconds, **kwargs)
             if response.status_code not in {429, 500, 502, 503, 504} or attempt == settings.provider_retries:
                 response.raise_for_status()
                 return response
+            retry_after = response.headers.get('retry-after')
+            if retry_after:
+                try: delay = max(0, float(retry_after))
+                except ValueError:
+                    try: delay = max(0, (parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)).total_seconds())
+                    except (ValueError, TypeError): pass
+                if delay > 30:
+                    response.raise_for_status()
         except (httpx.TimeoutException, httpx.NetworkError):
             if attempt == settings.provider_retries: raise
-        time.sleep(min(2 ** attempt, 4))
+        time.sleep(delay)
     raise RuntimeError('Provider retry limit reached')
 
 
@@ -117,14 +129,17 @@ class OllamaClient:
                 time.sleep(min(2 ** attempt, 4))
 
     def _stream_live(self, prompt):
-        payload = {'model': self.settings.ollama_model, 'prompt': prompt, 'stream': True, 'options': {'temperature': 0.1}}
+        payload = {'model': self.settings.ollama_model, 'prompt': prompt, 'stream': True, 'logprobs': True, 'top_logprobs': 5, 'options': {'temperature': 0.1}}
         # Never retry after tokens have been emitted: replay would corrupt the artifact.
         with httpx.stream('POST', f'{self.settings.ollama_base_url.rstrip("/")}/api/generate', json=payload, timeout=self.settings.request_timeout_seconds) as response:
             response.raise_for_status()
             done = False
+            probabilities = []
             for line in response.iter_lines():
                 if not line: continue
                 data = json.loads(line)
+                if isinstance(data.get('logprobs'), list):
+                    probabilities.extend(record for record in data['logprobs'] if isinstance(record, dict))
                 if data.get('error'): raise RuntimeError(data['error'])
                 if data.get('response'): yield LLMStreamChunk(text=data['response'])
                 if data.get('done'):
@@ -132,7 +147,8 @@ class OllamaClient:
                     done = True
                     provider_metadata = {key: data.get(key) for key in ('model', 'total_duration', 'load_duration', 'prompt_eval_count', 'eval_count', 'done_reason')}
                     provider_metadata['settings'] = payload['options']
-                    yield LLMStreamChunk(done=True, metadata={'entropy': {'available': False, 'source': 'ollama'}, 'logprob': {'available': False}, 'provider_metadata': provider_metadata})
+                    entropy, logprob = summarize_logprobs(probabilities, data.get('eval_count'))
+                    yield LLMStreamChunk(done=True, metadata={'entropy': entropy, 'logprob': logprob, 'provider_metadata': provider_metadata})
             if not done: raise RuntimeError('Generation stream ended before completion')
 
     def stream_repair(self, prompt): return self.stream_generate(prompt)
@@ -154,6 +170,22 @@ class GenerationMetadata(BaseModel):
     dependencies: list[str]
     entry_points: list[str]
     limitations: list[str]
+
+
+class CodeArtifact(GenerationMetadata):
+    code: str = Field(min_length=1)
+    repair_summary: list[str] = Field(default_factory=list)
+    fixed_evidence_ids: list[str] = Field(default_factory=list)
+    remaining_uncertainties: list[str] = Field(default_factory=list)
+    new_dependencies: list[str] = Field(default_factory=list)
+
+    @field_validator('code')
+    @classmethod
+    def source_without_markdown(cls, value: str) -> str:
+        if '```' in value:
+            value, _ = extract_code_block(value)
+        if not value.strip(): raise ValueError('Recovered source code is empty')
+        return value.strip()
 
 
 class RubricScore(BaseModel):
@@ -195,15 +227,18 @@ class JudgePool:
             if not set(data.evidence_ids) <= allowed: raise ValueError('Judge cited unknown evidence')
             return JudgeResult(judge_name=name, judge_model=model, role=role, **data.model_dump())
         except Exception as exc:
-            detail = type(exc).__name__
+            detail = ('Timeout: provider did not respond in time.' if isinstance(exc, httpx.TimeoutException) else
+                      'Network error: provider could not be reached.' if isinstance(exc, httpx.NetworkError) else
+                      'Invalid judge response: schema, rubric, or evidence validation failed.' if isinstance(exc, (ValueError, KeyError, IndexError, TypeError)) else type(exc).__name__)
             if isinstance(exc, httpx.HTTPStatusError):
-                detail += f' (HTTP {exc.response.status_code})'
+                status = exc.response.status_code
+                category = {401: 'Authentication failed', 403: 'Model access denied', 404: 'Model unavailable', 429: 'Rate limit or quota exhausted'}.get(status, 'Provider error')
+                detail = f'{category} (HTTP {status})'
                 try:
                     error = exc.response.json().get('error', {})
-                    if isinstance(error, dict):
-                        message = str(error.get('message', ''))[:250]
-                        if key: message = message.replace(key, '[redacted]')
-                        detail += ': ' + message
+                    message = str(error.get('message', '')) if isinstance(error, dict) else str(error)
+                    if key: message = message.replace(key, '[redacted]')
+                    if message: detail += ': ' + message[:250]
                 except ValueError: pass
             return JudgeResult(judge_name=name, judge_model=model, role=role, status='failed', explanation=f'Judging unavailable: {detail}')
 
