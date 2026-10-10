@@ -36,6 +36,7 @@ class Settings:
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
     mistral_model: str = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+    quality_safety_provider: str = os.getenv("QUALITY_SAFETY_PROVIDER", "gemini")
     allow_fake_llm: bool = os.getenv("DEHALU_ALLOW_FAKE_LLM", "false").lower() == "true"
     default_max_retry: int = int(os.getenv("DEHALU_MAX_RETRY", "3"))
     request_timeout_seconds: float = float(os.getenv("DEHALU_REQUEST_TIMEOUT_SECONDS", "120"))
@@ -52,6 +53,10 @@ class Settings:
         "DEHALU_CORS_ORIGIN_REGEX",
         r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?",
     )
+
+    def __post_init__(self) -> None:
+        if self.quality_safety_provider not in {"gemini", "mistral"}:
+            raise ValueError("QUALITY_SAFETY_PROVIDER must be gemini or mistral")
 
 
 settings = Settings()

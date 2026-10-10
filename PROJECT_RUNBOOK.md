@@ -6,7 +6,7 @@
 - Node.js 20+
 - Docker with Compose
 - Ollama running locally with the configured model pulled
-- Gemini, Groq, and Mistral API keys for live judge calls
+- Gemini and Groq API keys for live judge calls; Mistral is optional when selected for quality/safety
 
 ## Environment
 
@@ -18,7 +18,9 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5-coder:1.5b
 GEMINI_API_KEY=...
 GROQ_API_KEY=...
+# Optional unless QUALITY_SAFETY_PROVIDER=mistral
 MISTRAL_API_KEY=...
+QUALITY_SAFETY_PROVIDER=gemini
 DEHALU_MAX_RETRY=3
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 DEHALU_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
@@ -160,3 +162,9 @@ Generation and repairs request Ollama token probabilities (`logprobs=true`, `top
 The Metrics tab charts actual hallucination risk and MaHR across attempts. Both use a fixed 0–100% scale; risk is a comparative score rather than a calibrated error probability. Changes use percentage points and may decrease, stay flat, or increase.
 
 Code view displays completed source artifacts and fenced source during streaming. Unfenced model prose and JSON metadata are excluded; generation explanations remain in saved evidence/export. Malformed generation/repair artifacts trigger one structured format recovery within the same attempt. A reset event replaces the invalid draft, and recovered code goes through the full verification pipeline. If recovery also fails, the run stops with an explicit error and retains completed attempts. Recovery entropy stays unavailable because it is not measured from the replacement response.
+
+## Quality/safety provider selection
+
+`QUALITY_SAFETY_PROVIDER=gemini` (default) runs requirement alignment and quality/safety as separate Gemini calls using `GEMINI_API_KEY` and `GEMINI_MODEL`. Groq retains functional logic review. Three judge calls use two providers; Gemini reviews share model and quota. Set the selector to `mistral` to restore the Mistral role with its own key/model. Unsupported selector values fail at startup, and provider errors do not trigger automatic switching. Historical attempts are unchanged.
+
+Restart both API and worker after editing `.env`. Health and catalog readiness describe the active roles; an unused Mistral key is unnecessary. From `backend/`, run `PYTHONPATH=src .venv/bin/python scripts/provider_readiness.py --live` to consume a small amount of API quota and validate all three active judge responses. Omit `--live` for catalog-only checks. Catalog access alone does not prove generation access.

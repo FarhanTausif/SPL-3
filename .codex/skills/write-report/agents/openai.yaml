@@ -1,4 +1,4 @@
 interface:
   display_name: "Write Report"
-  short_description: "Create a seven-chapter SPL3 report in Word format"
-  default_prompt: "Use $write-report to generate my project report DOCX with the reference formatting and the seven required chapters."
+  short_description: "Revise SPL3 reports while preserving Word formatting"
+  default_prompt: "Use $write-report to revise my DeHalu report DOCX, preserving its existing fonts and formatting while applying the supervisor's structure, figure-list, section-summary, and citation guidance."
