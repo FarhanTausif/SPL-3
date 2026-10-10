@@ -42,8 +42,8 @@ it("shows clarification questions with the answer form and resumes the same run"
   await user.click(screen.getByRole("button", { name: "Generate" }));
   await screen.findByText("Which runtime should be used?");
   await user.type(screen.getByLabelText("Clarification answers"), "Python 3.11");
-  await user.click(screen.getByRole("button", { name: "Resume run" }));
-  await waitFor(() => expect(api.clarifyRun).toHaveBeenCalledWith("run-1", "Python 3.11"));
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(api.clarifyRun).toHaveBeenCalledWith("run-1", "Python 3.11", false));
 });
 it("cancels from the header while retaining completed evidence", async () => {
   const user = userEvent.setup();

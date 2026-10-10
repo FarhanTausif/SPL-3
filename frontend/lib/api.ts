@@ -43,6 +43,7 @@ export type RunStreamEvent =
       attempt_no?: number;
     }
   | { type: "token"; attempt_no: number; text: string }
+  | { type: "generation_reset"; attempt_no: number }
   | { type: "attempt_completed"; attempt: AttemptEvidence }
   | { type: "run_completed"; run: RunSummary; evidence: RunEvidence }
   | { type: "context"; inferred: InferenceResult }
@@ -130,8 +131,8 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
 export const listRuns = () => api<RunSummary[]>("/runs");
 export const getRun = (id: string) => api<RunSummary>(`/runs/${id}`);
 export const cancelRun = (id: string) => api<RunSummary>(`/runs/${id}/cancel`, {});
-export const clarifyRun = (id: string, answers: string) =>
-  api<RunSummary>(`/runs/${id}/clarification`, { answers });
+export const clarifyRun = (id: string, answers: string, skip = false) =>
+  api<RunSummary>(`/runs/${id}/clarification`, { answers, skip_clarification: skip });
 export const exportUrl = (id: string) => `${API_BASE}/api/runs/${id}/export`;
 export const getHealth = () => api<import("./contracts.generated").HealthResponse>("/health");
 

@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080">
+<title>01 · System Architecture</title>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<rect x="35" y="140" width="1130" height="825" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="51" y="168" text-anchor="start" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="700">APPLICATION + LOCAL SERVICES</text>
+<rect x="1200" y="140" width="350" height="825" rx="10" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="1216" y="168" text-anchor="start" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="700">MODEL / METADATA SERVICES</text>
+<path d="M170,260 L205,260" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
+<path d="M435,225 L480,225" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
+<path d="M480,310 L435,310" fill="none" stroke="#10B981" stroke-width="1.8" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
+<path d="M560,345 L560,775" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
+<path d="M680,775 L680,345" fill="none" stroke="#10B981" stroke-width="1.8" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
+<path d="M900,775 L900,655" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
+<path d="M1050,655 L1050,775" fill="none" stroke="#10B981" stroke-width="1.8" marker-end="url(#arrow)"/>
+<path d="M1140,275 L1240,275" fill="none" stroke="#8B5CF6" stroke-width="1.8" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M1140,520 L1240,520" fill="none" stroke="#8B5CF6" stroke-width="1.8" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M1140,615 L1180,615 L1180,790 L1240,790" fill="none" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
+<text x="40" y="60" text-anchor="start" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="30" font-weight="700">DeHalu | System Architecture</text>
+<text x="40" y="97" text-anchor="start" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="700">Implemented architecture · execution-free code verification · local generation + external semantic judges</text>
+<rect x="55" y="210" width="115" height="100" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="112.5" y="238.0" text-anchor="middle" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">User</text>
+<text x="112.5" y="264.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Programming</text>
+<text x="112.5" y="285.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">request</text>
+<rect x="205" y="190" width="230" height="155" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5"/>
+<text x="320.0" y="224.5" text-anchor="middle" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">Next.js / React UI</text>
+<text x="320.0" y="250.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Prompt + clarification</text>
+<text x="320.0" y="271.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Live code / stage progress</text>
+<text x="320.0" y="292.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Evidence + attempt comparison</text>
+<text x="320.0" y="313.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Run history / JSON export</text>
+<rect x="480" y="190" width="280" height="155" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5"/>
+<text x="620.0" y="224.5" text-anchor="middle" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">FastAPI API</text>
+<text x="620.0" y="250.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">REST: runs, evidence, control</text>
+<text x="620.0" y="271.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Enqueue / cancel / resume</text>
+<text x="620.0" y="292.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">SSE: replay persisted events</text>
+<text x="620.0" y="313.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Health / capabilities</text>
+<rect x="820" y="190" width="320" height="465" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5"/>
+<text x="980.0" y="306.0" text-anchor="middle" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">Background Worker</text>
+<text x="980.0" y="332.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">PostgreSQL queue consumer</text>
+<text x="980.0" y="353.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Leases + heartbeat + concurrency</text>
+<text x="980.0" y="374.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14"></text>
+<text x="980.0" y="395.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">DeHaluPipeline orchestrator</text>
+<text x="980.0" y="416.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Intake → local code generation</text>
+<text x="980.0" y="437.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Claims → static checks → metrics</text>
+<text x="980.0" y="458.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Judges → consensus → CoVe</text>
+<text x="980.0" y="479.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Policy → accept / warn / reject</text>
+<text x="980.0" y="500.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Repair → full re-verification</text>
+<text x="980.0" y="521.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14"></text>
+<text x="980.0" y="542.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Stage checkpoints + event journal</text>
+<path d="M480,793 C480,769 1140,769 1140,793 L1140,917 C1140,941 480,941 480,917 Z" fill="#ECFDF5" stroke="#10B981" stroke-width="1.5"/>
+<path d="M480,793 C480,817 1140,817 1140,793" fill="none" stroke="#10B981" stroke-width="1.5"/>
+<text x="810.0" y="822.0" text-anchor="middle" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">PostgreSQL 16</text>
+<text x="810.0" y="848.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Durable queue: run_jobs  |  SSE event journal: run_events</text>
+<text x="810.0" y="869.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Sessions / runs / generated outputs / attempt evidence</text>
+<text x="810.0" y="890.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Claims / static findings / metrics / judges / consensus / CoVe / policy</text>
+<text x="810.0" y="911.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">SQLAlchemy persistence · Alembic migrations</text>
+<rect x="1240" y="205" width="270" height="155" rx="10" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="1.5"/>
+<text x="1375.0" y="239.5" text-anchor="middle" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">Local Ollama / CodeLLM</text>
+<text x="1375.0" y="265.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Generation + evidence-led repair</text>
+<text x="1375.0" y="286.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Structured intake / claims / CoVe</text>
+<text x="1375.0" y="307.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Streamed generation tokens</text>
+<text x="1375.0" y="328.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Separate local inference process</text>
+<rect x="1240" y="430" width="270" height="195" rx="10" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="1.5"/>
+<text x="1375.0" y="463.5" text-anchor="middle" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">Semantic Judge Providers</text>
+<text x="1375.0" y="489.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Gemini: requirement alignment</text>
+<text x="1375.0" y="510.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Groq: functional logic</text>
+<text x="1375.0" y="531.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Mistral: quality / safety</text>
+<text x="1375.0" y="552.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14"></text>
+<text x="1375.0" y="573.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">3 independent calls in parallel</text>
+<text x="1375.0" y="594.5" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Structured verdicts + evidence</text>
+<rect x="1240" y="715" width="270" height="150" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="1375.0" y="747.0" text-anchor="middle" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">Package Registries</text>
+<text x="1375.0" y="773.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">PyPI / npm / crates.io</text>
+<text x="1375.0" y="794.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Optional metadata lookups</text>
+<text x="1375.0" y="815.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Disabled by default</text>
+<text x="1375.0" y="836.0" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Process-local result cache</text>
+<text x="55" y="788" text-anchor="start" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700">Static verification resources</text>
+<text x="55" y="814" text-anchor="start" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Installed Tree-sitter grammars</text>
+<text x="55" y="835" text-anchor="start" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Local Semgrep rules + API catalogs</text>
+<text x="55" y="856" text-anchor="start" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="14">Generated code is never executed</text>
+<text x="40" y="1002" text-anchor="start" fill="#0F172A" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="700">Reading the diagram</text>
+<text x="40" y="1028" text-anchor="start" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">Solid arrows: requests, processing, or persistence  ·  Dashed arrows: live-event delivery or optional lookups</text>
+<text x="40" y="1048" text-anchor="start" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">Worker modules are logical components in one process. See page 02 for the verification and repair flow.</text>
+<rect x="437.8" y="198" width="38.4" height="18" rx="3" fill="white"/>
+<text x="457" y="211" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">REST</text>
+<rect x="441.1" y="319" width="31.799999999999997" height="18" rx="3" fill="white"/>
+<text x="457" y="332" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">SSE</text>
+<rect x="477.7" y="516" width="150.6" height="18" rx="3" fill="white"/>
+<text x="553" y="529" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">1 · enqueue / control</text>
+<rect x="601.4" y="622" width="157.2" height="36" rx="3" fill="white"/>
+<text x="680" y="635" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">5 · history / evidence</text>
+<text x="680" y="653" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">+ event polling</text>
+<rect x="836.1" y="689" width="97.8" height="36" rx="3" fill="white"/>
+<text x="885" y="702" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">2 · claim job</text>
+<text x="885" y="720" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">SKIP LOCKED</text>
+<rect x="978.0" y="722" width="144.0" height="36" rx="3" fill="white"/>
+<text x="1050" y="735" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">4 · persist evidence</text>
+<text x="1050" y="753" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">+ journal events</text>
+<rect x="1164.2" y="257" width="51.599999999999994" height="36" rx="3" fill="white"/>
+<text x="1190" y="270" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">HTTP /</text>
+<text x="1190" y="288" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">stream</text>
+<rect x="1160.9" y="502" width="58.199999999999996" height="36" rx="3" fill="white"/>
+<text x="1190" y="515" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">HTTPS /</text>
+<text x="1190" y="533" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">JSON</text>
+<rect x="1147.6" y="672" width="64.8" height="36" rx="3" fill="white"/>
+<text x="1180" y="685" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">Optional</text>
+<text x="1180" y="703" text-anchor="middle" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="13">HTTPS</text>
+</svg>

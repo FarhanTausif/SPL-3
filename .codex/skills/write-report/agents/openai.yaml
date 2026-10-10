@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Report"
+  short_description: "Create a seven-chapter SPL3 report in Word format"
+  default_prompt: "Use $write-report to generate my project report DOCX with the reference formatting and the seven required chapters."

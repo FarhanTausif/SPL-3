@@ -34,3 +34,5 @@ frontend/package-lock.json
 frontend/.next-check/
 frontend/playwright-report/
 frontend/test-results/
+
+/reports

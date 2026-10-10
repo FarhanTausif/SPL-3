@@ -6,7 +6,8 @@ from pathlib import Path
 
 
 def _load_dotenv() -> None:
-    for path in [Path.cwd() / ".env", Path.cwd().parent / ".env"]:
+    root = Path(__file__).resolve().parents[4]
+    for path in [root / "backend" / ".env", root / ".env"]:
         if not path.exists():
             continue
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -32,7 +33,7 @@ class Settings:
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
     groq_api_key: str | None = os.getenv("GROQ_API_KEY")
     mistral_api_key: str | None = os.getenv("MISTRAL_API_KEY")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
     mistral_model: str = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
     allow_fake_llm: bool = os.getenv("DEHALU_ALLOW_FAKE_LLM", "false").lower() == "true"

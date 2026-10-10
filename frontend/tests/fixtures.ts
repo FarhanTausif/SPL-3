@@ -17,6 +17,7 @@ export const makeRun = (patch: Partial<RunSummary> = {}): RunSummary => ({
     constraints: [],
     uncertain_assumptions: [],
     clarification_questions: [],
+      clarification_details: [],
     needs_clarification: false
   },
   model_name: "qwen2.5-coder",

@@ -25,7 +25,7 @@ import { Workflow } from "@/components/Workflow";
 import { StatusBadge } from "@/components/StatusBadge";
 import { MarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { ClarificationPanel } from "@/components/ClarificationPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -49,11 +49,9 @@ export default function Home() {
   const [view, setView] = useState("code");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [draftKey, setDraftKey] = useState(0);
-  const [answer, setAnswer] = useState("");
   const [source, setSource] = useState<SourceTarget | null>(null);
   useEffect(() => {
     setView("code");
-    setAnswer("");
     setSource(null);
   }, [run?.id]);
   const freshRun = () => {
@@ -81,7 +79,10 @@ export default function Home() {
   const streamed =
     partialOutput &&
     !workspace.attempts.some((a) => a.output.attempt_no === partialOutput.attempt_no)
-      ? { ...workspace.streamed, [partialOutput.attempt_no]: partialOutput.code }
+      ? {
+          ...workspace.streamed,
+          [partialOutput.attempt_no]: `\`\`\`${run?.inferred.language ?? "text"}\n${partialOutput.code}\n\`\`\``
+        }
       : workspace.streamed;
   const drafts = mergeAttempts(workspace.attempts, streamed);
   const data = evidence ? selectedEvidence(evidence, workspace.selectedAttempt) : undefined;
@@ -136,7 +137,11 @@ export default function Home() {
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-1">
             {run && <StatusBadge value={run.status} />}
-            <ProviderStatus health={workspace.health} judges={data?.judge_results ?? []} />
+            <ProviderStatus
+              health={workspace.health}
+              judges={data?.judge_results ?? []}
+              onRefresh={workspace.refreshHealth}
+            />
             {active && (
               <Button
                 variant="destructive"
@@ -228,39 +233,12 @@ export default function Home() {
               </Collapsible>
               <ResultPanel run={run} policy={data?.policy ?? null} />
               {run.status === "needs_clarification" && (
-                <form
-                  className="rounded-lg border border-sky-200 bg-active-surface p-4"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (answer.trim()) void workspace.clarify(answer.trim());
-                  }}
-                >
-                  <h2 className="text-base font-semibold">A little more context</h2>
-                  <div className="my-3">
-                    <MarkdownText>
-                      {run.inferred.clarification_questions.map((q) => `- ${q}`).join("\n")}
-                    </MarkdownText>
-                  </div>
-                  <label className="sr-only" htmlFor="clarification">
-                    Clarification answers
-                  </label>
-                  <Textarea
-                    id="clarification"
-                    value={answer}
-                    onChange={(e) => setAnswer(e.target.value)}
-                    placeholder="Answer the questions to continue…"
-                    disabled={workspace.actionPending}
-                    className="bg-card"
-                  />
-                  <Button
-                    type="submit"
-                    disabled={!answer.trim() || workspace.actionPending}
-                    className="mt-3"
-                  >
-                    {workspace.actionPending && <Loader2 className="size-4 animate-spin" />}Resume
-                    run
-                  </Button>
-                </form>
+                <ClarificationPanel
+                  key={run.id}
+                  inferred={run.inferred}
+                  pending={workspace.actionPending}
+                  onContinue={(answers, skip) => void workspace.clarify(answers, skip)}
+                />
               )}
               <Tabs value={view} onValueChange={setView} className="min-w-0">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">

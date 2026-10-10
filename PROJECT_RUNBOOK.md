@@ -125,7 +125,7 @@ PYTHONPATH=backend/src backend/.venv/bin/python backend/scripts/generate_contrac
 
 `POST /api/runs` returns HTTP 202. `GET /api/runs/{id}/events` supports event replay using `after` or `Last-Event-ID`. The former POST streaming endpoint remains a compatibility wrapper around the same durable queue.
 
-Judge model defaults now use `gemini-flash-latest`, `openai/gpt-oss-20b`, and `mistral-small-latest`. Existing `.env` values take precedence; update retired model names there. Provider catalog visibility does not guarantee generation quota or model access. These failures are shown explicitly in judge evidence and prevent unrestricted acceptance.
+Judge model defaults now use `gemini-3.8-flash`, `openai/gpt-oss-20b`, and `mistral-small-latest`. Existing `.env` values take precedence; update retired model names there. Provider catalog visibility does not guarantee generation quota or model access. These failures are shown explicitly in judge evidence and prevent unrestricted acceptance.
 
 Use `PYTHONPATH=src .venv/bin/python scripts/provider_readiness.py` from `backend` to check authenticated model catalogs without displaying credentials. `scripts/smoke_live.py` performs real provider calls; use a disposable, migrated `DATABASE_URL` for that check.
 
@@ -146,3 +146,17 @@ npm run test:browser
 ```
 
 Browser checks use mocked API/SSE responses, an isolated build, and port 3001. They do not call paid providers or execute generated code. Screenshots and failure traces are written to `/tmp/dehalu-ui-checks`. The checked widths are 360, 768, 1280, and 1440 pixels. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an existing local Chromium binary.
+
+## Clarification, judge coverage, and entropy
+
+Environment loading uses the repository location, independent of the launch directory. Process environment overrides `backend/.env`, which overrides the root `.env`. Restart both the API and worker after changing provider settings. The retired Groq `llama-3.1-8b-instant` configuration should use `openai/gpt-oss-20b`.
+
+Clarification is limited to one round with at most three questions. Choose an option or enter a custom answer (custom text takes priority), then Continue. Run Anyway uses the current answers/defaults and bypasses more questions; verification still runs. Delegation such as “do it on your own” uses stated assumptions. Completed/bypassed clarification is persisted across worker restarts and browser reloads.
+
+Provider status separates database/Ollama health from judge coverage. Configured credentials are unchecked until a real judge response is obtained. Refresh updates service/configuration status; it does not rerun historical judge calls. Rate limits, quota failures, timeouts, and model access failures remain explicit and prevent unrestricted acceptance.
+
+Generation and repairs request Ollama token probabilities (`logprobs=true`, `top_logprobs=5`). Estimated token entropy is the mean entropy of returned top-token probabilities plus grouped remaining mass, normalized by `log(6)` for the score. It is a lower bound on full-distribution entropy, measured over the full generated response, including metadata. Raw nats, measured token coverage, and sampled-token log probabilities are retained. Unsupported/malformed measurements remain unavailable; old attempts are not backfilled. Metric definition is version 2.1.
+
+The Metrics tab charts actual hallucination risk and MaHR across attempts. Both use a fixed 0–100% scale; risk is a comparative score rather than a calibrated error probability. Changes use percentage points and may decrease, stay flat, or increase.
+
+Code view displays completed source artifacts and fenced source during streaming. Unfenced model prose and JSON metadata are excluded; generation explanations remain in saved evidence/export. Malformed generation/repair artifacts trigger one structured format recovery within the same attempt. A reset event replaces the invalid draft, and recovered code goes through the full verification pipeline. If recovery also fails, the run stops with an explicit error and retains completed attempts. Recovery entropy stays unavailable because it is not measured from the replacement response.

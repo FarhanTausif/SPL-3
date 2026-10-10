@@ -11,13 +11,29 @@ export function mergeAttempts(
   }
   for (const [attemptNo, code] of Object.entries(streamed)) {
     if (code.trim() && !map.has(Number(attemptNo))) {
-      const artifact = code.match(/```[^\n]*\n([\s\S]*?)(?:```|$)/);
-      map.set(Number(attemptNo), artifact?.[1] ?? code);
+      const artifactCode = streamedCodeArtifact(code);
+      if (artifactCode.trim()) map.set(Number(attemptNo), artifactCode);
     }
   }
   return Array.from(map.entries())
     .sort(([a], [b]) => a - b)
     .map(([attempt_no, code]) => ({ attempt_no, code }));
+}
+
+export function streamedCodeArtifact(raw: string): string {
+  const opening = /^```([^\n`]*)\n/gm;
+  let match: RegExpExecArray | null;
+  while ((match = opening.exec(raw))) {
+    const start = opening.lastIndex;
+    const closing = /^```[^\n]*$/gm;
+    closing.lastIndex = start;
+    const end = closing.exec(raw);
+    if (!["json", "md", "markdown"].includes(match[1].trim().toLowerCase()))
+      return raw.slice(start, end?.index ?? raw.length).replace(/\n`{1,2}$/, "");
+    if (!end) return "";
+    opening.lastIndex = closing.lastIndex;
+  }
+  return "";
 }
 
 export function buildLineDiff(before: string, after: string): DiffLine[] {

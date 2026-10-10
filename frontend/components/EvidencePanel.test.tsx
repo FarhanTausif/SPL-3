@@ -18,6 +18,7 @@ const emptyRun: RunEvidence = {
       constraints: [],
       uncertain_assumptions: [],
       clarification_questions: [],
+      clarification_details: [],
       needs_clarification: false
     },
     model_name: "m",

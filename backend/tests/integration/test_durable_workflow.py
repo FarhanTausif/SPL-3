@@ -172,3 +172,79 @@ def test_repair_cannot_introduce_unverified_dependency(sessions, monkeypatch):
         evidence = DeHaluPipeline(db).get_evidence(run.id)
         assert run.status == 'rejected'
         assert any(f.rule_id == 'repair.disallowed-dependency' for f in evidence.attempts[-1].static_findings)
+
+
+@pytest.mark.parametrize('skip', [False, True])
+def test_clarification_does_not_repeat_after_resume(sessions, skip):
+    with sessions() as db:
+        run = enqueue(db, RunCreate(prompt='add', max_retry=0))
+        DeHaluPipeline(db).execute(run.id)
+        assert DeHaluPipeline(db).get_run(run.id).status == 'needs_clarification'
+        resume(db, run.id, '' if skip else 'do it on your own', None, skip)
+    with sessions() as db:
+        DeHaluPipeline(db).execute(run.id)
+        evidence = DeHaluPipeline(db).get_evidence(run.id)
+        assert evidence.run.status == 'completed'
+        assert evidence.attempts and not evidence.run.inferred.needs_clarification
+        assert RunRepository(db).get_run(run.id).run_metadata['clarification_completed'] is True
+
+
+@pytest.mark.parametrize('broken_json', [False, True])
+def test_malformed_model_intake_can_clarify_then_generate(sessions, monkeypatch, broken_json):
+    import dehalu.services.pipeline as pipeline
+    from dehalu.providers.llm import OllamaClient
+    monkeypatch.setattr(pipeline, 'settings', Settings(allow_fake_llm=False, package_lookups=False))
+    def structured(self, *args, **kwargs):
+        if broken_json: raise ValueError('Invalid JSON response')
+        return {'language': 'generic', 'needs_clarification': True,
+                'clarification_questions': ['What should text processing do?'],
+                'clarification_details': [{'question': 'What should text processing do?', 'choices': [
+                    {'label': 'Summarize', 'value': 'Summarize text', 'recommended': True},
+                    {'label': 'Search', 'value': 'Search text', 'recommended': True},
+                    {'label': 'Classify', 'value': 'Classify text', 'recommended': True}]}]}
+    monkeypatch.setattr(OllamaClient, 'structured', structured)
+    with sessions() as db:
+        run = enqueue(db, RunCreate(prompt='Develop a real-time text processing web service.', max_retry=0))
+        DeHaluPipeline(db).execute(run.id)
+        waiting = DeHaluPipeline(db).get_run(run.id)
+        assert waiting.status == 'needs_clarification' and waiting.error is None
+        assert sum(c.recommended for c in waiting.inferred.clarification_details[0].choices) == 1
+        resume(db, run.id, 'Use defaults', None, True)
+    monkeypatch.setattr(pipeline, 'settings', Settings(allow_fake_llm=True, package_lookups=False))
+    with sessions() as db:
+        DeHaluPipeline(db).execute(run.id)
+        evidence = DeHaluPipeline(db).get_evidence(run.id)
+        assert evidence.run.status == 'completed'
+        assert evidence.attempts[0].output.code
+
+
+@pytest.mark.parametrize('recovery_valid', [True, False])
+def test_prose_repair_has_one_bounded_recovery_and_keeps_completed_code(sessions, monkeypatch, recovery_valid):
+    from dehalu.providers.llm import OllamaClient, LLMStreamChunk
+    def repair(self, prompt):
+        yield LLMStreamChunk(text='Based on the evidence, processor.predict is uncertain.')
+        yield LLMStreamChunk(done=True)
+    calls = []
+    def structured(self, system, payload, schema=None):
+        calls.append(payload)
+        if not recovery_valid: return {'explanation': 'Still discussing the evidence.'}
+        return {'code': 'def add(a, b):\n    return a + b', 'assumptions': [], 'dependencies': [], 'entry_points': ['add'], 'limitations': [], 'repair_summary': ['Removed fake dependency']}
+    monkeypatch.setattr(OllamaClient, 'stream_repair', repair)
+    monkeypatch.setattr(OllamaClient, 'structured', structured)
+    with sessions() as db:
+        run = DeHaluPipeline(db).create_run(RunCreate(prompt='Write Python code using fake_lib_404', max_retry=1))
+        evidence = DeHaluPipeline(db).get_evidence(run.id)
+        assert len(calls) == 1
+        assert evidence.attempts[0].output.code.startswith('import fake_lib_404')
+        if recovery_valid:
+            assert run.status == 'completed' and len(evidence.attempts) == 2
+            repaired = evidence.attempts[1]
+            assert repaired.output.metadata['format_recovered'] is True
+            assert repaired.claims and repaired.output.code.startswith('def add')
+            assert repaired.metrics.entropy_score is None
+        else:
+            assert run.status == 'failed' and len(evidence.attempts) == 1
+            assert 'one format recovery attempt' in run.error
+            assert evidence.partial['format_recovery_failed']
+        events = db.scalars(select(RunEventRecord).where(RunEventRecord.run_id == run.id)).all()
+        assert any(e.event_type == 'generation_reset' for e in events)
