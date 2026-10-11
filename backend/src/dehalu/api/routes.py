@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from dehalu.domain.models import ClarificationAnswers, HealthResponse, RunCreate, RunEvidence, RunSummary
 from dehalu.core.settings import settings
+from dehalu.core.judges import judge_specs
 from dehalu.services.pipeline import DeHaluPipeline
 from dehalu.state.database import SessionLocal, get_session
 from dehalu.state.models import RunRecord, RunEventRecord
@@ -35,8 +36,8 @@ def health(db: Session = Depends(get_session)):
             models = [item['name'] for item in response.json()['models']]
             ollama.update(reachable=True, model_available=settings.ollama_model in models)
         except (httpx.HTTPError, ValueError, KeyError): pass
-    judges = {name: {'configured': bool(key), 'model': model, 'readiness': 'configured_unchecked' if key else 'unavailable'} for name, key, model in [
-        ('gemini', settings.gemini_api_key, settings.gemini_model), ('groq', settings.groq_api_key, settings.groq_model), ('mistral', settings.mistral_api_key, settings.mistral_model)]}
+    judges = {spec.name: {'configured': bool(spec.key), 'model': spec.model, 'provider': spec.provider, 'role': spec.role,
+        'readiness': 'configured_unchecked' if spec.key else 'unavailable'} for spec in judge_specs(settings)}
     coverage = [c for adapter in REGISTRY.values() for c in adapter.coverage()]
     return HealthResponse(status='ok' if database == 'ok' and ollama['model_available'] and all(j['configured'] for j in judges.values()) else 'degraded', database=database, ollama=ollama, judges=judges, capabilities=coverage)
 

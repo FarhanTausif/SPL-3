@@ -1,4 +1,47 @@
-# Reference formatting and DOCX construction
+# DOCX formatting and revision
+
+## Current authority: user-edited DeHalu v2
+
+For revisions, use a copy of `DeHalu_Final_Report_v2.docx` as the base and preserve the original. Inspect it each time because the user may update it again. The current document overrides every legacy measurement and template instruction below. Do not rebuild it from the bundled template or apply global font/spacing/alignment presets.
+
+OOXML inspection on 10 October 2026 found these properties; they are observations, not a rendered fidelity claim:
+
+| Element | Current v2 properties |
+| --- | --- |
+| Page | US Letter portrait; 1-inch margins; header/footer distance 0.5 inch; usable width 6.5 inches |
+| Body | Predominantly direct Times New Roman 11 pt; common 1.15 spacing and 12 pt before/after; many narrative paragraphs justified, some left aligned |
+| Styles | Defaults still specify Arial 11 pt; Heading 1/2/3 definitions retain 20/16/14 pt. Direct overrides determine much of the visible appearance |
+| First chapter heading | Direct Times New Roman bold 23 pt; before 24 pt, after 6 pt |
+| Later chapter headings | Times New Roman overrides, commonly inherited 20 pt; before 20 pt, after 4 pt; local alignment varies |
+| Early chapter 1 subsections | Times New Roman 17 pt overrides; common before 14 pt, after 4 pt |
+| Front titles | Table of Contents: Times New Roman 21 pt; current List of Figure: Times New Roman bold 23 pt. Correct the label without restyling |
+| Captions | Centered Times New Roman 11 pt, commonly `Figure-N: Description` |
+| Exceptions | Roboto Mono code and some Arial, Century Schoolbook and Cardo runs; preserve intentional local differences |
+| Sections | Multiple continuous/next-page sections, footer references, first-page settings and numbering restarts; preserve actual settings |
+
+Reading `styles.xml` alone would incorrectly suggest Arial. Preserve named styles **and** direct `w:pPr`/`w:rPr` overrides. Keep the cover's existing layout, logos, signature lines and supplied date. Preserve table borders, widths, cell margins, fonts, media dimensions and editable structure. Clone equivalent local formatting for additions; never normalize the whole document to one font.
+
+Replace text at run level where practical. Assigning `paragraph.text` or `cell.text` flattens existing runs, formatting, hyperlinks and fields. When cloning paragraphs, copy formatting but avoid duplicate bookmark IDs/relationships, accidental section breaks or copied page breaks. Retain native heading levels and renumber literal heading text once; do not add a second numbering system. New abstracts/overview headings use current first-chapter subsection formatting; introductions use local body formatting.
+
+Compare source/output formatting on retained elements and inspect fonts on inserted prose and refreshed field results. Index refresh can introduce inherited Arial despite Times New Roman overrides. Changes in pagination are expected from content changes; global restyling is not. References is unnumbered back matter, deliberately included in the TOC without becoming numbered chapter 8. Preserve the existing TOC depth (v2 selects Heading 1 and Heading 2).
+
+## List of Figures repair
+
+The inspected v2 has `List of Figure`, five empty entries (`Figure 1:` through `Figure 5:`), and body captions with numbering gaps. Correct these during the subsequent report revision; they are not formatting examples to reproduce.
+
+1. Inventory actual images, captions and all in-text references, including paragraphs inside tables. Cover logos are not figures. Investigate missing numbers/captions against nearby material before deciding what exists.
+2. Number actual figures continuously in document order; update captions and every related in-text reference together. Keep caption descriptions and fixture provenance unless correcting content. Never invent a figure to fill a gap.
+3. Prefer native `SEQ Figure` fields with bookmarks and `REF` references, preserving visible `Figure-N: Description` formatting. Generate a table of figures using `TOC \h \z \c "Figure"` (or a reliable caption-style equivalent), rather than indexing chapter headings.
+4. Replace empty entries with full captions, refreshed page fields and working navigation. Preserve location/local list typography and correct the title to **List of Figures**. Do not guess page numbers or retain an unrelated manual list.
+5. Verify one entry per actual figure, exact caption agreement, no skipped/duplicate numbers, and correct page links after rendering. Keep captions out of the chapter TOC.
+
+Refresh caption/cross-reference fields, Table of Contents, List of Figures and page fields; repeat once pagination settles if necessary. `w:updateFields` only requests refresh, and headless PDF export alone does not prove indexes were refreshed. In Word use `Ctrl+A`, `F9`, and update both indexes in full. Inspect for broken reference errors and stale entries. If refresh is unavailable, retain editable fields and disclose the limitation with these instructions.
+
+For rendering, use an isolated profile and output copy as illustrated below. Do not convert back over the original or accept a restyled round trip. Inspect cover, both indexes, each chapter start, tables, figures/screenshots, References and final page, comparing representative unchanged content to a source preview. Check font substitution, overflow, cropping, blank pages and footer numbering. Rendering is required before claiming fidelity or confirmed page count.
+
+## Legacy fallback only
+
+The remaining sections document the older reference/template for **new reports when the current user-edited DOCX is unavailable**. They must not override v2's direct formatting, cover, TOC depth or section numbering. Adapt the fallback's chapter markers to the current `SKILL.md` structure, Abstract/Project Overview, List of Figures, introductions and References. Do not replace the reusable blank template with the user's full report.
 
 ## Authority and measured properties
 

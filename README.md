@@ -28,7 +28,7 @@ It generates code locally through Ollama, extracts checkable claims, gathers sta
 - **Streamed code generation** — watch code arrive alongside stage progress in a Next.js workspace.
 - **Prompt clarification** — infer language, framework, and runtime requirements, with a bounded clarification round when needed.
 - **Static verification** — combine Tree-sitter parsing, Semgrep rules, lexical symbol checks, and selected package/API catalogs.
-- **Three semantic judges** — Gemini checks requirement alignment, Groq checks functional logic, and Mistral checks quality and safety.
+- **Three semantic judges** — Gemini checks requirement alignment, Groq checks functional logic, and a separate Gemini call checks quality and safety by default. Mistral remains an optional quality/safety provider.
 - **Chain-of-Verification (CoVe)** — check extracted claims against evidence and retain supported, unsupported, and uncertain results.
 - **Evidence-driven repairs** — retry within a configured budget and compare code and metrics across attempts.
 - **Durable runs** — PostgreSQL-backed jobs, a separate worker, and replayable server-sent events preserve progress across browser reloads.
@@ -126,16 +126,22 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5-coder:1.5b
 GEMINI_API_KEY=your-gemini-key
 GROQ_API_KEY=your-groq-key
-MISTRAL_API_KEY=your-mistral-key
+QUALITY_SAFETY_PROVIDER=gemini
+# Optional unless QUALITY_SAFETY_PROVIDER=mistral
+MISTRAL_API_KEY=
 ```
 
 Use `GEMINI_MODEL`, `GROQ_MODEL`, and `MISTRAL_MODEL` to select models available to your provider accounts. The checked-in values are configuration defaults; authenticated model access and quota must be verified for your accounts.
+
+Set `QUALITY_SAFETY_PROVIDER=gemini` to use the existing Gemini key and model for a separate quality/safety review. Set it to `mistral` to restore Mistral. The default configuration runs three judge calls across two providers; both Gemini reviews share a model and quota. Provider failures remain explicit; there is no automatic provider switch. Historical evidence is unchanged.
 
 Restart **both the API and worker** after changing backend settings. Check configured provider catalogs from `backend/`:
 
 ```bash
 source .venv/bin/activate
 PYTHONPATH=src python scripts/provider_readiness.py
+# Optional: consume API quota to validate all three active judge roles
+PYTHONPATH=src python scripts/provider_readiness.py --live
 ```
 
 Live semantic judging sends the prompt, generated code, and verification context to the configured external providers. Missing keys, quota failures, and invalid responses remain explicit in the evidence and prevent unrestricted acceptance.
@@ -149,7 +155,7 @@ flowchart TD
     C --> D[Claim extraction]
     D --> E[Tree-sitter, Semgrep, and symbol/API checks]
     E --> F[Metrics and uncertainty signals]
-    F --> G[Gemini, Groq, and Mistral judge pool]
+    F --> G[Three-role Gemini and Groq judge pool]
     G --> H[Judge consensus and Chain-of-Verification]
     H --> I{Policy decision}
     I -->|Accept or warn| J[Code and evidence]
@@ -193,7 +199,8 @@ Use [`.env.example`](.env.example) as the starting point. Backend precedence is 
 | `DATABASE_URL` | SQLAlchemy connection URL; the local Compose database uses port `5433`. |
 | `DEHALU_ALLOW_FAKE_LLM` | Enable deterministic generation and simulated judge results; defaults to `false`. |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Local generation and repair service/model. |
-| `GEMINI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY` | Credentials for live semantic judges. |
+| `GEMINI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY` | Credentials for live semantic judges; Mistral is only required when selected. |
+| `QUALITY_SAFETY_PROVIDER` | `gemini` (default) or `mistral` for quality/safety review. |
 | `GEMINI_MODEL`, `GROQ_MODEL`, `MISTRAL_MODEL` | Provider-specific judge model identifiers. |
 | `DEHALU_MAX_RETRY` | Repair budget; `3` allows the initial attempt plus up to three repairs. |
 | `DEHALU_PACKAGE_LOOKUPS` | Enable cached PyPI/npm/crates metadata requests; defaults to `false` for local catalogs only. |

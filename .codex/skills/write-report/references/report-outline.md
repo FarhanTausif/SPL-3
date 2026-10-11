@@ -1,16 +1,17 @@
 # Seven-chapter coverage
 
-The chapter titles and order are fixed by the user. Adapt the following default subsections to the evidence without adding top-level chapters.
+The seven numbered chapters follow the latest supervisor guidance recorded in `SKILL.md`. Adapt the default subsections to the evidence and preserve useful coverage from the user's revised DOCX. Add unnumbered References after chapter 7.
 
-## 1. Project Overview
+Every substantive parent heading needs a short introduction before its children: purpose, actual subsection coverage, and how those parts relate. Leaf sections need explanatory prose before supporting tables/figures/lists. Chapter 1's title-only opening is the exception. Keep numbering continuous after moves or deletions; do not preserve gaps such as the current jump from 3.6 to 3.8.
 
-- 1.1 Project Title: name, concise description, verified public repository URL when available.
-- 1.2 Problem Statement: concrete problem, affected users, motivation.
-- 1.3 Objectives: assessable goals to revisit in the conclusion.
-- 1.4 Scope: implemented boundaries and proposed/out-of-scope work.
-- 1.5 Deliverables: actual software, documentation, delivered artifacts.
+## 1. Project Title
 
-## 2. Requirement Analysis
+Use `1. Project Title` as the chapter heading, followed only by the exact project title (reuse the user's title wording), then the abstract. No project description or chapter roadmap belongs between the title and abstract.
+
+- **1.1 Abstract:** concise, self-contained academic prose covering the broad domain and relevant SE4AI/AI4SE positioning, hallucination detection/mitigation and local CodeLLMs; project rationale; concrete problem; methodology; and actual achievements with evidence limits. Distinguish implemented execution-free static verification from sandbox execution/metamorphic checks proposed earlier. Do not invent benchmark improvements or present fixture tests as live-model effectiveness. Define uncommon abbreviations and avoid citation-dependent exposition where possible.
+- **1.2 Project Overview:** merge Objectives with Scope and Evolution from the current report. Explain assessable goals, implemented boundaries, justified evolution from the proposal, excluded/proposed features, actual deliverables, and necessary evidence terminology. Integrate the old problem-statement and organization material where useful without repeating the abstract. Use `1.2.x` children only where they improve readability, with an introduction before them. Place a verified public repository URL here or in chapter 6, never as description under Project Title.
+
+## 2. Requirements Analysis
 
 - 2.1 Stakeholders and Users: roles, needs, interactions.
 - 2.2 Functional Requirements: grouped requirements with stable IDs, obligations expressed with “shall,” source/priority where supported.
@@ -69,4 +70,8 @@ Revisit objectives using demonstrated functionality and test evidence. Summarize
 
 ## Rubric deliverables
 
-The attached image mentions about 50–60 pages, a user manual, a publicly accessible version-controlled repository URL, and an installer if applicable. Include the manual as chapter 6, the verified URL in chapters 1/6, and installer instructions only when applicable. The user's seven-chapter scope overrides the reference's additional chapters.
+The original rubric mentions about 50–60 pages, a user manual, a publicly accessible version-controlled repository URL, and an installer if applicable. Include the manual as chapter 6, the verified URL in Project Overview/chapter 6, and installer instructions only when applicable. The latest supervisor guidance supersedes the older outline's chapter 1 structure and prohibition on Abstract/References.
+
+## Unnumbered References
+
+After chapter 7, include the papers and websites actually cited, using `[1]`, `[2]`, and so on in first-citation order. Follow [citations.md](citations.md) for metadata, URLs, verification, and proposal-source handling. Do not add an eighth numbered chapter or a separate literature-review chapter.
